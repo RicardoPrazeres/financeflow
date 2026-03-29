@@ -778,4 +778,13 @@ tr:hover td{background:var(--surface2);}
   .kpi-grid{grid-template-columns:1fr;}
   .form-grid{grid-template-columns:1fr;}
   .btn-label{display:none;}
+  .modal{
+    padding: 20px;
+    width: 95vw;
+    border-radius: 12px;
+  }
+  .modal-title{font-size: 18px;}
+  .cards-grid{grid-template-columns: 1fr;}
+  .cc-val-monthly{font-size: 22px;}
+  .budget-amounts{flex-direction: column; gap: 4px;}
 }

@@ -35,6 +35,23 @@ const SMART_RULES = [
   { keywords:['ação','fundo','tesouro','cdb','poupança','dividendo','investimento','renda fixa'], cat:'investment' },
 ];
 
+// ── FIREBASE ─────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyCI31-BVkX2z7i_D9bn9UWdjMEjVIj5EwI",
+  authDomain: "financeflow-98869.firebaseapp.com",
+  projectId: "financeflow-98869",
+  storageBucket: "financeflow-98869.firebasestorage.app",
+  messagingSenderId: "303697782800",
+  appId: "1:303697782800:web:d53a70759d9bab3954c295",
+  measurementId: "G-9H52PYRSNP"
+};
+let app, db, auth, currentUser = null;
+if (typeof firebase !== 'undefined') {
+  app = firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+  auth = firebase.auth();
+}
+
 // ── STATE ────────────────────────────────────────
 let transactions = [];
 let budgets = [];
@@ -45,13 +62,39 @@ let chartMonthly = null, chartCategory = null, chartAnnual = null, chartTopCat =
 
 // ── INIT ─────────────────────────────────────────
 function init() {
-  loadData();
+  if (auth) {
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        currentUser = user;
+        document.getElementById('loginOverlay').style.display = 'none';
+        loadDataFromFirebase();
+      } else {
+        currentUser = null;
+        document.getElementById('loginOverlay').style.display = 'flex';
+      }
+    });
+  } else {
+    loadData();
+    finishInit();
+  }
+}
+
+function finishInit() {
   buildCategorySelects();
   setDefaultDate();
   setDefaultFilterMonth();
   setupEventListeners();
   navigate('dashboard');
-  loadDemoDataIfEmpty();
+  if (!currentUser) loadDemoDataIfEmpty();
+}
+
+function loginWithGoogle() {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(err => alert('Erro no login: ' + err.message));
+}
+
+function logout() {
+  if (auth) auth.signOut();
 }
 
 function loadData() {
@@ -60,10 +103,43 @@ function loadData() {
   categories   = JSON.parse(localStorage.getItem('ff_categories')   || JSON.stringify(DEFAULT_CATEGORIES));
 }
 
+function loadDataFromFirebase() {
+  if (!currentUser) return;
+  db.collection('users').doc(currentUser.uid).get().then(doc => {
+    if (doc.exists) {
+      const data = doc.data();
+      transactions = JSON.parse(data.transactions || '[]');
+      budgets      = JSON.parse(data.budgets      || '[]');
+      categories   = JSON.parse(data.categories   || JSON.stringify(DEFAULT_CATEGORIES));
+      localStorage.setItem('ff_transactions', JSON.stringify(transactions));
+      localStorage.setItem('ff_budgets',      JSON.stringify(budgets));
+      localStorage.setItem('ff_categories',   JSON.stringify(categories));
+    } else {
+       loadData(); 
+       loadDemoDataIfEmpty();
+       saveData();
+    }
+    finishInit();
+  }).catch(err => {
+    console.error('Erro ao ler firestore:', err);
+    loadData();
+    finishInit();
+  });
+}
+
 function saveData() {
   localStorage.setItem('ff_transactions', JSON.stringify(transactions));
   localStorage.setItem('ff_budgets',      JSON.stringify(budgets));
   localStorage.setItem('ff_categories',   JSON.stringify(categories));
+  
+  if (currentUser && db) {
+    db.collection('users').doc(currentUser.uid).set({
+      transactions: JSON.stringify(transactions),
+      budgets: JSON.stringify(budgets),
+      categories: JSON.stringify(categories),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(e => console.error("Erro ao salvar nuvem", e));
+  }
 }
 
 // ── DEMO DATA ────────────────────────────────────
@@ -712,10 +788,16 @@ function deleteCategory(id) {
 }
 
 function clearAllData() {
-  if (!confirm('⚠️ Isso irá apagar TODOS os dados. Continuar?')) return;
+  if (!confirm('⚠️ Isso irá apagar TODOS os dados locais e na nuvem. Continuar?')) return;
   if (!confirm('Tem certeza absoluta? Esta ação não pode ser desfeita.')) return;
   localStorage.clear();
-  location.reload();
+  if (currentUser && db) {
+    db.collection('users').doc(currentUser.uid).delete().then(() => {
+      location.reload();
+    });
+  } else {
+    location.reload();
+  }
 }
 
 // ── EXPORT CSV ───────────────────────────────────
