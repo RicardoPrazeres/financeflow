@@ -1085,7 +1085,7 @@ function renderCards() {
 
     // Total acumulado = soma de todas as parcelas já lançadas
     const totalAmount = transactions
-      .filter(t => isThisCard(t))
+      .filter(t => isThisCard(t) && t.date?.slice(0,7) <= month)
       .reduce((sum, t) => sum + t.amount, 0);
 
     // Parcelas futuras (após o mês selecionado)
