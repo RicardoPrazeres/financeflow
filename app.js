@@ -54,6 +54,102 @@ if (typeof firebase !== 'undefined') {
     .catch(err => console.error("Auth persistence setup erro: ", err));
 }
 
+// ── GEMINI AI (RECEIPT SCANNING) ─────────────────
+const GEMINI_API_KEY = 'AIzaSyBMrHsPG86oTgfsoXsVOC3bZ7pEIkk9fo0';
+
+function triggerScanReceipt() {
+  document.getElementById('receiptFileInput').click();
+}
+
+async function handleReceiptImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const overlay = document.getElementById('scanOverlay');
+  overlay.style.display = 'flex';
+
+  try {
+    const base64 = await fileToBase64(file);
+    const result = await analyzeReceiptWithGemini(base64, file.type);
+    overlay.style.display = 'none';
+    prefillTransactionFromReceipt(result);
+  } catch (err) {
+    overlay.style.display = 'none';
+    console.error('Erro ao escanear nota:', err);
+    alert('❌ Não foi possível analisar a imagem. Tente uma foto mais clara da nota fiscal.');
+  }
+  event.target.value = '';
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+  });
+}
+
+async function analyzeReceiptWithGemini(base64, mimeType) {
+  const prompt = `Analise esta imagem de nota fiscal ou comprovante de pagamento.
+Extraia as informações da transação e retorne APENAS um JSON válido, sem markdown, sem explicações extras.
+Formato exato:
+{
+  "desc": "nome do estabelecimento ou descrição curta da compra",
+  "amount": 0.00,
+  "date": "YYYY-MM-DD",
+  "type": "expense",
+  "cat": "uma das seguintes: food, transport, housing, health, education, leisure, clothing, bills, salary, freelance, investment, other",
+  "notes": "informações adicionais relevantes"
+}
+Regras:
+- amount deve ser um número sem símbolos (ex: 45.90)
+- date deve ser no formato YYYY-MM-DD (use a data de hoje se não encontrar: ${new Date().toISOString().slice(0,10)})
+- cat deve ser uma das opções listadas
+- Se for nota de restaurante/mercado use cat "food"
+- Se for farmácia/médico use cat "health"
+- Se for combustível/transporte use cat "transport"`;
+
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: mimeType, data: base64 } }
+          ]
+        }],
+        generationConfig: { temperature: 0.1 }
+      })
+    }
+  );
+
+  if (!resp.ok) throw new Error(`Gemini API error: ${resp.status}`);
+  const data = await resp.json();
+  const text = data.candidates[0].content.parts[0].text;
+  const clean = text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+  return JSON.parse(clean);
+}
+
+function prefillTransactionFromReceipt(data) {
+  openModal();
+  setTimeout(() => {
+    setType(data.type || 'expense');
+    document.getElementById('fDesc').value    = data.desc  || '';
+    document.getElementById('fAmount').value  = data.amount || '';
+    document.getElementById('fDate').value    = data.date  || new Date().toISOString().slice(0,10);
+    document.getElementById('fNotes').value   = data.notes || '';
+    const catSel = document.getElementById('fCategory');
+    if (catSel) {
+      [...catSel.options].forEach(o => { if(o.value === data.cat) catSel.value = data.cat; });
+    }
+    showToast(`✅ Nota analisada! Confira os dados e salve.`);
+  }, 200);
+}
+
 // ── STATE ────────────────────────────────────────
 let transactions = [];
 let budgets = [];

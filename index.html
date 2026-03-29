@@ -228,6 +228,11 @@
           🔔
           <span class="alert-count" id="alertCount" style="display:none">0</span>
         </div>
+        <!-- SCAN RECEIPT BUTTON -->
+        <button class="btn btn-scan" id="btnScanReceipt" onclick="triggerScanReceipt()" title="Escanear Nota Fiscal com IA">
+          <span>📷</span> <span class="btn-label">Escanear Nota</span>
+        </button>
+        <input type="file" id="receiptFileInput" accept="image/*" capture="environment" style="display:none" onchange="handleReceiptImage(event)">
         <button class="btn btn-primary" id="btnAddTransaction" onclick="openModal()">
           <span>+</span> <span class="btn-label">Nova Transação</span>
         </button>
@@ -568,6 +573,14 @@
 
   <!-- TOAST -->
   <div id="toast" class="toast"></div>
+
+  <!-- AI SCAN LOADING OVERLAY -->
+  <div id="scanOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:10000; flex-direction:column; align-items:center; justify-content:center; gap:20px;">
+    <div style="font-size:48px; animation: spin 1.5s linear infinite;">🔍</div>
+    <div style="color:#fff; font-size:18px; font-weight:600;">Analisando nota fiscal...</div>
+    <div style="color:#aaa; font-size:14px;">A IA está extraindo os dados da imagem</div>
+    <style> @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} } </style>
+  </div>
 
   <!-- ── PATCH: card + installment logic ── -->
   <script>

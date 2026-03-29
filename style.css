@@ -184,6 +184,23 @@ body::after{
 
 .topbar-right{display:flex;align-items:center;gap:12px;}
 
+.btn-scan{
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity .2s, transform .1s;
+  box-shadow: 0 4px 16px rgba(249,115,22,0.35);
+}
+.btn-scan:hover{opacity:.9; transform:scale(1.02);}
+
 .hamburger{
   display:none;
   background:var(--surface2);
