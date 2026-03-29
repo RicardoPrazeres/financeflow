@@ -50,6 +50,8 @@ if (typeof firebase !== 'undefined') {
   app = firebase.initializeApp(firebaseConfig);
   db = firebase.firestore();
   auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+    .catch(err => console.error("Auth persistence setup erro: ", err));
 }
 
 // ── STATE ────────────────────────────────────────
