@@ -154,6 +154,29 @@
       border: none;
       padding: 0;
     }
+
+    /* ── Responsive installment chips on mobile ── */
+    @media (max-width: 480px) {
+      .tx-installment-detail {
+        gap: 4px;
+      }
+      .tx-inst-chip {
+        font-size: 10px;
+        padding: 2px 7px;
+      }
+      .tx-installment-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+      }
+      .tx-card-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+      }
+      .btn-scan {
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -582,31 +605,26 @@
     <style> @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} } </style>
   </div>
 
-  <!-- ── PATCH: card + installment logic ── -->
+  <!-- Card + Installment UI Logic -->
   <script>
-    /* ─── State ─── */
-    window._selectedCard = 'inter'; // default (global so app.js can read it)
+    window._selectedCard = 'inter';
 
-    /* ─── Payment change ─── */
     function onPaymentChange() {
-      const payment = document.getElementById('fPayment').value;
-      const cardGroup      = document.getElementById('cardSelectorGroup');
-      const installGroup   = document.getElementById('installmentGroup');
-      const installPreview = document.getElementById('installmentPreview');
-
+      const payment     = document.getElementById('fPayment').value;
+      const cardGroup   = document.getElementById('cardSelectorGroup');
+      const installGrp  = document.getElementById('installmentGroup');
+      const installPrev = document.getElementById('installmentPreview');
       if (payment === 'credito' || payment === 'debito') {
-        cardGroup.style.display = '';
-        // only credit allows installments
-        installGroup.style.display = payment === 'credito' ? '' : 'none';
+        cardGroup.style.display  = '';
+        installGrp.style.display = payment === 'credito' ? '' : 'none';
       } else {
-        cardGroup.style.display = 'none';
-        installGroup.style.display = 'none';
-        installPreview.classList.remove('visible');
+        cardGroup.style.display  = 'none';
+        installGrp.style.display = 'none';
+        if (installPrev) installPrev.classList.remove('visible');
       }
       updateInstallmentPreview();
     }
 
-    /* ─── Card selection ─── */
     function selectCard(card) {
       window._selectedCard = card;
       document.querySelectorAll('.card-chip').forEach(c => {
@@ -614,297 +632,27 @@
       });
     }
 
-    /* ─── Installment preview ─── */
     function updateInstallmentPreview() {
-      const amount    = parseFloat(document.getElementById('fAmount').value) || 0;
+      const totalAmt  = parseFloat(document.getElementById('fAmount').value) || 0;
       const installEl = document.getElementById('fInstallments');
       const preview   = document.getElementById('installmentPreview');
-
-      if (!installEl || document.getElementById('installmentGroup').style.display === 'none') {
-        preview.classList.remove('visible');
+      const grp       = document.getElementById('installmentGroup');
+      if (!installEl || !preview || (grp && grp.style.display === 'none')) {
+        if (preview) preview.classList.remove('visible');
         return;
       }
-
       const n = parseInt(installEl.value) || 1;
-      if (n <= 1 || amount === 0) {
-        preview.classList.remove('visible');
-        return;
-      }
-
-      const parcela = amount / n;
-      preview.innerHTML =
-        `<strong>${n}x de ${fmt(parcela)}</strong> &nbsp;·&nbsp; Total: ${fmt(amount)}`;
+      if (n <= 1 || totalAmt === 0) { preview.classList.remove('visible'); return; }
+      const parcela = totalAmt / n;
+      preview.innerHTML = `<strong>${n}x de ${_fmtBRL(parcela)}</strong> &nbsp;&middot;&nbsp; Total: ${_fmtBRL(totalAmt)}`;
       preview.classList.add('visible');
     }
 
-    function fmt(v) {
-      return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    }
-
-    /* ─── Override saveTransaction to capture card + installments ─── */
-    document.addEventListener('DOMContentLoaded', () => {
-      // After app.js is loaded, patch saveTransaction
-      const origSave = window.saveTransaction;
-      window.saveTransaction = function() {
-        // inject extra fields before original save runs
-        const payment    = document.getElementById('fPayment').value;
-        const installEl  = document.getElementById('fInstallments');
-        const n          = (payment === 'credito' && installEl) ? parseInt(installEl.value) || 1 : 1;
-        const amount     = parseFloat(document.getElementById('fAmount').value) || 0;
-
-        // Store extras in hidden data attributes read by the patched render
-        window._pendingCard         = (payment === 'credito' || payment === 'debito') ? _selectedCard : null;
-        window._pendingInstallments = n;
-        window._pendingInstallTotal = amount;
-        window._pendingInstallValue = n > 1 ? (amount / n) : amount;
-
-        origSave.apply(this, arguments);
-      };
-
-      /* Reset modal extras on open */
-      const origOpen = window.openModal;
-      window.openModal = function() {
-        origOpen && origOpen.apply(this, arguments);
-        // reset card selector
-        selectCard('inter');
-        // reset installments
-        const inst = document.getElementById('fInstallments');
-        if (inst) inst.value = '1';
-        document.getElementById('installmentPreview').classList.remove('visible');
-        // trigger payment change to set initial visibility
-        onPaymentChange();
-      };
-
-      // Init on load
-      onPaymentChange();
-    });
-  </script>
-
-  <!-- PATCH 2: enrich transaction rendering to show card + installment info -->
-  <script>
-    /* 
-      This patch hooks into the app.js transaction-saving pipeline.
-      It stores card and installment metadata on each transaction object,
-      and patches the render functions to display them.
-    */
-
-    /* We intercept localStorage writes to embed the extra data */
-    const _origSetItem = localStorage.setItem.bind(localStorage);
-
-    /* Utility: get card label */
-    function getCardLabel(cardKey) {
-      const map = { inter:'Inter', nubank:'Nubank', amazon:'Amazon', outro:'Outro' };
-      return map[cardKey] || cardKey;
-    }
-    function getCardClass(cardKey) {
-      return 'tx-card-' + (cardKey || 'outro');
-    }
-
-    /* 
-      After DOMContentLoaded, wrap the original saveTransaction so we can
-      tag the last saved transaction with card/installment data.
-    */
-    document.addEventListener('DOMContentLoaded', () => {
-      // Give app.js a tick to load
-      setTimeout(() => {
-        const origSave2 = window.saveTransaction;
-        window.saveTransaction = function() {
-          // Capture values BEFORE app.js save (form is still populated)
-          const payment  = document.getElementById('fPayment')?.value;
-          const n        = parseInt(document.getElementById('fInstallments')?.value) || 1;
-          const amount   = parseFloat(document.getElementById('fAmount')?.value) || 0;
-          const editingId = window._editingId || null; // track if editing
-
-          // If parcelado (credito + n>1), temporarily set the amount field to
-          // the installment value so app.js saves the correct per-parcel amount
-          const amountInput = document.getElementById('fAmount');
-          if (payment === 'credito' && n > 1 && amountInput) {
-            amountInput.value = (amount / n).toFixed(2);
-          }
-
-          origSave2.apply(this, arguments);
-
-          // Restore original amount in the field (for UI consistency)
-          if (payment === 'credito' && n > 1 && amountInput) {
-            amountInput.value = amount;
-          }
-
-          // Now tag the saved transaction with installment/card metadata
-          try {
-            const raw = localStorage.getItem('ff_transactions'); // chave correta
-            if (!raw) return;
-            const txs = JSON.parse(raw);
-            if (!txs.length) return;
-
-            // Find the transaction: if editing use editingId, else use last
-            let tx;
-            if (editingId) {
-              tx = txs.find(t => t.id === editingId);
-            } else {
-              tx = txs[txs.length - 1];
-            }
-            if (!tx) return;
-
-            if (payment === 'credito' || payment === 'debito') {
-              tx.cardKey   = _selectedCard;
-              tx.cardLabel = getCardLabel(_selectedCard);
-            } else {
-              delete tx.cardKey;
-              delete tx.cardLabel;
-            }
-
-            if (payment === 'credito' && n > 1) {
-              tx.installments     = n;
-              tx.installmentPaid  = tx.installmentPaid || 1;
-              tx.installmentValue = +(amount / n).toFixed(2);
-              tx.installmentTotal = amount;
-              // ensure stored amount is per-parcel
-              tx.amount           = tx.installmentValue;
-            } else {
-              // À vista or non-credit: clear installment fields, restore full amount
-              delete tx.installments;
-              delete tx.installmentPaid;
-              delete tx.installmentValue;
-              delete tx.installmentTotal;
-              tx.amount = amount;
-            }
-
-            localStorage.setItem('ff_transactions', JSON.stringify(txs)); // chave correta
-          } catch(e) { console.warn('patch err', e); }
-        };
-
-        /* ── Patch openModal to restore installment/card data when editing ── */
-        const origOpenModal = window.openModal;
-        window.openModal = function(id) {
-          origOpenModal && origOpenModal.apply(this, arguments);
-
-          if (id) {
-            window._editingId = id;
-            // 150ms ensures app.js finishes populating the form before we restore
-            setTimeout(() => restoreEditFields(id), 200);
-          } else {
-            window._editingId = null;
-          }
-        };
-
-        function restoreEditFields(id) {
-          try {
-            const raw = localStorage.getItem('ff_transactions'); // chave correta
-            if (!raw) return;
-            const txs = JSON.parse(raw);
-            const tx  = txs.find(t => String(t.id) === String(id));
-            if (!tx) return;
-
-            // 1. Restaurar forma de pagamento ANTES de chamar onPaymentChange
-            const payEl = document.getElementById('fPayment');
-            if (payEl && tx.payment) {
-              payEl.value = tx.payment;
-            }
-
-            // 2. Atualizar visibilidade de cartão/parcelamento
-            onPaymentChange();
-
-            // 3. Restaurar cartão selecionado
-            if (tx.cardKey) selectCard(tx.cardKey);
-
-            // 4. Restaurar parcelas
-            const installEl = document.getElementById('fInstallments');
-            if (installEl && tx.installments && tx.installments > 1) {
-              installEl.value = String(tx.installments);
-              // Mostrar valor total no campo (não por parcela)
-              const amountInput = document.getElementById('fAmount');
-              if (amountInput && tx.installmentTotal) {
-                amountInput.value = tx.installmentTotal;
-              }
-              updateInstallmentPreview();
-            } else if (installEl) {
-              installEl.value = '1';
-              updateInstallmentPreview();
-            }
-          } catch(e) { console.warn('edit restore err', e); }
-        }
-
-        /* Patch the transaction row renderer */
-        patchTxRenderer();
-      }, 200);
-    });
-
-    function patchTxRenderer() {
-      /* 
-        app.js renders tx rows via innerHTML. We intercept after renders 
-        by using a MutationObserver on the tx lists to annotate rows.
-      */
-      const targets = ['txList','recentList'];
-      targets.forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        new MutationObserver(() => annotateTxRows(id)).observe(el, { childList: true, subtree: true });
-      });
-    }
-
-    function annotateTxRows(listId) {
-      try {
-        const raw = localStorage.getItem('ff_transactions'); // chave correta
-        if (!raw) return;
-        const txs = JSON.parse(raw);
-        const txMap = {};
-        txs.forEach(t => { txMap[t.id] = t; });
-
-        const rows = document.querySelectorAll(`#${listId} .tx-item`);
-        rows.forEach(row => {
-          // Extrai o id do atributo onclick: openModal('XXXX')
-          const onclickAttr = row.getAttribute('onclick') || '';
-          const match = onclickAttr.match(/openModal\('([^']+)'\)/);
-          if (!match) return;
-          const tx = txMap[match[1]];
-          if (!tx) return;
-          if (row.dataset.annotated) return; // already done
-          row.dataset.annotated = '1';
-
-          const metaEl = row.querySelector('.tx-meta') || row.querySelector('.tx-sub') || row.querySelector('small');
-          if (!metaEl) return;
-
-          // Card badge
-          if (tx.cardKey) {
-            const badge = document.createElement('span');
-            badge.className = `tx-card-badge ${getCardClass(tx.cardKey)}`;
-            badge.textContent = tx.cardLabel || tx.cardKey;
-            metaEl.appendChild(badge);
-          }
-
-          // Installment badge + detail chips
-          if (tx.installments && tx.installments > 1) {
-            const paid      = tx.installmentPaid || 1;
-            const remaining = tx.installments - paid;
-
-            // Badge inline na linha de meta
-            const badge = document.createElement('span');
-            badge.className = 'tx-installment-badge';
-            badge.textContent = `${paid}/${tx.installments}x`;
-            metaEl.appendChild(badge);
-
-            // Chips informativos abaixo
-            const detail = document.createElement('div');
-            detail.className = 'tx-installment-detail';
-            detail.innerHTML =
-              `<span class="tx-inst-chip parcela">` +
-                `💳 ${fmt2(tx.installmentValue)}/parcela` +
-              `</span>` +
-              `<span class="tx-inst-chip total">` +
-                `Total ${fmt2(tx.installmentTotal)}` +
-              `</span>` +
-              `<span class="tx-inst-chip prog">` +
-                `Faltam ${remaining}x` +
-              `</span>`;
-            row.appendChild(detail);
-          }
-        });
-      } catch(e) { console.warn('annotate err', e); }
-    }
-
-    function fmt2(v) {
+    function _fmtBRL(v) {
       return Number(v).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
     }
+
+    document.addEventListener('DOMContentLoaded', () => { onPaymentChange(); });
   </script>
 
   <script src="app.js"></script>

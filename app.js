@@ -322,6 +322,11 @@ function renderSection(sec) {
   if (sec === 'settings')     renderSettings();
 }
 
+function currentSection() {
+  const active = document.querySelector('.section.active');
+  return active ? active.id.replace('sec-', '') : 'dashboard';
+}
+
 // ── EVENT LISTENERS ──────────────────────────────
 function setupEventListeners() {
   document.querySelectorAll('.nav-item').forEach(el => {
