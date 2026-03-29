@@ -105,9 +105,10 @@ function loadData() {
   categories   = JSON.parse(localStorage.getItem('ff_categories')   || JSON.stringify(DEFAULT_CATEGORIES));
 }
 
+let isInitialSync = true;
 function loadDataFromFirebase() {
   if (!currentUser) return;
-  db.collection('users').doc(currentUser.uid).get().then(doc => {
+  db.collection('users').doc(currentUser.uid).onSnapshot(doc => {
     if (doc.exists) {
       const data = doc.data();
       transactions = JSON.parse(data.transactions || '[]');
@@ -117,15 +118,31 @@ function loadDataFromFirebase() {
       localStorage.setItem('ff_budgets',      JSON.stringify(budgets));
       localStorage.setItem('ff_categories',   JSON.stringify(categories));
     } else {
-       loadData(); 
-       loadDemoDataIfEmpty();
-       saveData();
+       if (isInitialSync) {
+         loadData(); 
+         loadDemoDataIfEmpty();
+         saveData();
+       }
     }
-    finishInit();
-  }).catch(err => {
+    if (isInitialSync) {
+      isInitialSync = false;
+      finishInit();
+    } else {
+      renderSection(currentSection());
+      if (currentSection() !== 'dashboard') {
+         renderDashboardKPIs();
+      }
+    }
+  }, err => {
     console.error('Erro ao ler firestore:', err);
-    loadData();
-    finishInit();
+    if (err.message.includes("permission") || err.code === 'permission-denied') {
+      alert("⚠️ FIREBASE: Ops! Você esqueceu de alterar as Regras do Firestore para modo de teste ('allow read, write: if true;').");
+    }
+    if (isInitialSync) {
+      isInitialSync = false;
+      loadData();
+      finishInit();
+    }
   });
 }
 
@@ -140,7 +157,12 @@ function saveData() {
       budgets: JSON.stringify(budgets),
       categories: JSON.stringify(categories),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }).catch(e => console.error("Erro ao salvar nuvem", e));
+    }).catch(e => {
+      console.error("Erro ao salvar nuvem", e);
+      if (e.message.includes("permission") || e.code === 'permission-denied') {
+        alert("O Firebase não deixou salvar. Vá no Console > Firestore > Regras, e libere o acesso!");
+      }
+    });
   }
 }
 
