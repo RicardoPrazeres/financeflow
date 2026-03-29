@@ -585,7 +585,7 @@
   <!-- ── PATCH: card + installment logic ── -->
   <script>
     /* ─── State ─── */
-    let _selectedCard = 'inter'; // default
+    window._selectedCard = 'inter'; // default (global so app.js can read it)
 
     /* ─── Payment change ─── */
     function onPaymentChange() {
@@ -608,7 +608,7 @@
 
     /* ─── Card selection ─── */
     function selectCard(card) {
-      _selectedCard = card;
+      window._selectedCard = card;
       document.querySelectorAll('.card-chip').forEach(c => {
         c.classList.toggle('selected', c.dataset.card === card);
       });

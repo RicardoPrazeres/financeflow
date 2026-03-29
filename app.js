@@ -409,19 +409,33 @@ function openModal(id = null) {
     const tx = transactions.find(t => t.id === id);
     setType(tx.type);
     document.getElementById('fDesc').value     = tx.desc;
-    document.getElementById('fAmount').value   = tx.amount;
+    // Show total amount (not installment value) when editing
+    document.getElementById('fAmount').value   = tx.installmentTotal || tx.amount;
     document.getElementById('fDate').value     = tx.date;
     document.getElementById('fCategory').value = tx.cat;
     document.getElementById('fPayment').value  = tx.payment;
     document.getElementById('fNotes').value    = tx.notes || '';
     document.getElementById('fRecurring').checked = tx.recurring || false;
+    // Restore card selection
+    window._editingId = id;
+    if (typeof selectCard === 'function') selectCard(tx.cardKey || 'inter');
+    if (typeof onPaymentChange === 'function') onPaymentChange();
+    // Restore installments
+    const installEl = document.getElementById('fInstallments');
+    if (installEl) installEl.value = tx.installments > 1 ? String(tx.installments) : '1';
+    if (typeof updateInstallmentPreview === 'function') updateInstallmentPreview();
   } else {
+    window._editingId = null;
     setType('expense');
     document.getElementById('fDesc').value   = '';
     document.getElementById('fAmount').value = '';
     document.getElementById('fNotes').value  = '';
     document.getElementById('fRecurring').checked = false;
     setDefaultDate();
+    if (typeof selectCard === 'function') selectCard('inter');
+    if (typeof onPaymentChange === 'function') onPaymentChange();
+    const installEl = document.getElementById('fInstallments');
+    if (installEl) installEl.value = '1';
   }
 
   modal.classList.add('open');
@@ -438,24 +452,57 @@ function setType(type) {
 }
 
 function saveTransaction() {
-  const desc   = document.getElementById('fDesc').value.trim();
-  const amount = parseFloat(document.getElementById('fAmount').value);
-  const date   = document.getElementById('fDate').value;
-  const cat    = document.getElementById('fCategory').value;
-  const payment = document.getElementById('fPayment').value;
-  const notes  = document.getElementById('fNotes').value.trim();
+  const desc      = document.getElementById('fDesc').value.trim();
+  const totalAmt  = parseFloat(document.getElementById('fAmount').value);
+  const date      = document.getElementById('fDate').value;
+  const cat       = document.getElementById('fCategory').value;
+  const payment   = document.getElementById('fPayment').value;
+  const notes     = document.getElementById('fNotes').value.trim();
   const recurring = document.getElementById('fRecurring').checked;
 
-  if (!desc) { showToast('Informe uma descrição', 'error'); return; }
-  if (!amount || amount <= 0) { showToast('Informe um valor válido', 'error'); return; }
-  if (!date) { showToast('Informe a data', 'error'); return; }
+  // Installment/card data from the DOM (set by the patch script)
+  const installEl  = document.getElementById('fInstallments');
+  const n          = (payment === 'credito' && installEl) ? (parseInt(installEl.value) || 1) : 1;
+  const cardKey    = (payment === 'credito' || payment === 'debito') ? (window._selectedCard || 'outro') : null;
+  const cardLabel  = cardKey ? ({'inter':'Inter','nubank':'Nubank','amazon':'Amazon','outro':'Outro'}[cardKey] || cardKey) : null;
+
+  if (!desc)   { showToast('Informe uma descrição', 'error'); return; }
+  if (!totalAmt || totalAmt <= 0) { showToast('Informe um valor válido', 'error'); return; }
+  if (!date)   { showToast('Informe a data', 'error'); return; }
+
+  // If installments > 1 save per-installment amount, keep total metadata
+  const savedAmount = n > 1 ? +(totalAmt / n).toFixed(2) : totalAmt;
+  const installData = n > 1 ? {
+    installments:     n,
+    installmentPaid:  1,
+    installmentValue: savedAmount,
+    installmentTotal: totalAmt,
+  } : {
+    installments:     null,
+    installmentPaid:  null,
+    installmentValue: null,
+    installmentTotal: null,
+  };
 
   if (editingId) {
     const idx = transactions.findIndex(t => t.id === editingId);
-    transactions[idx] = { ...transactions[idx], type:currentType, desc, amount, date, cat, payment, notes, recurring };
+    const existingPaid = transactions[idx].installmentPaid || 1;
+    transactions[idx] = {
+      ...transactions[idx],
+      type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
+      cardKey, cardLabel,
+      ...installData,
+      // preserve installmentPaid if already set
+      installmentPaid: n > 1 ? existingPaid : null,
+    };
     showToast('Transação atualizada ✓', 'success');
   } else {
-    transactions.push({ id:uid(), type:currentType, desc, amount, date, cat, payment, notes, recurring, createdAt:new Date().toISOString() });
+    transactions.push({
+      id:uid(), type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
+      cardKey, cardLabel,
+      ...installData,
+      createdAt:new Date().toISOString()
+    });
     showToast('Transação adicionada ✓', 'success');
   }
 
@@ -724,13 +771,31 @@ function txItemHTML(t, showActions=false) {
     <button class="tx-btn" onclick="event.stopPropagation();deleteTransaction('${t.id}')" title="Excluir">🗑</button>
   </div>` : '';
 
+  // Installment info
+  let installBadge = '';
+  let installDetail = '';
+  if (t.installments && t.installments > 1) {
+    const paid      = t.installmentPaid || 1;
+    const remaining = t.installments - paid;
+    installBadge  = `<span class="tx-installment-badge">${paid}/${t.installments}x</span>`;
+    installDetail = `<div class="tx-installment-detail">
+      <span class="tx-inst-chip parcela">💳 R$ ${fmt(t.installmentValue)}/parcela</span>
+      <span class="tx-inst-chip total">Total R$ ${fmt(t.installmentTotal)}</span>
+      <span class="tx-inst-chip prog">Faltam ${remaining}x</span>
+    </div>`;
+  }
+
+  // Card badge
+  const cardBadge = t.cardLabel ? `<span class="tx-card-badge tx-card-${t.cardKey || 'outro'}">${t.cardLabel}</span>` : '';
+
   return `<div class="tx-item" onclick="openModal('${t.id}')">
     <div class="tx-icon" style="background:${cat.color}22">${cat.emoji}</div>
     <div class="tx-info">
       <div class="tx-desc">${esc(t.desc)}${t.recurring?' 🔄':''}</div>
-      <div class="tx-meta">${cat.name} · ${dateStr} · ${t.payment}</div>
+      <div class="tx-meta">${cat.name} · ${dateStr} · ${t.payment}${cardBadge}${installBadge}</div>
+      ${installDetail}
     </div>
-    <div class="tx-amount ${t.type}">${t.type==='income'?'+':'-'}R$ ${fmt(t.amount)}</div>
+    <div class="tx-amount ${t.type}">${t.type==='income'?'+':'-'}R$ ${fmt(t.installmentValue || t.amount)}</div>
     ${actions}
   </div>`;
 }
