@@ -9,7 +9,7 @@ const DEFAULT_CATEGORIES = [
   { id:'food',       name:'Alimentação',   emoji:'🍔', color:'#f59e0b' },
   { id:'transport',  name:'Transporte',    emoji:'🚗', color:'#3b82f6' },
   { id:'housing',    name:'Moradia',       emoji:'🏠', color:'#8b5cf6' },
-  { id:'health',     name:'Saúde',         emoji:'❤️', color:'#ef4444' },
+  { id:'health',     name:'Saúde',         emoji:'🏥', color:'#ef4444' },
   { id:'education',  name:'Educação',      emoji:'📚', color:'#06b6d4' },
   { id:'leisure',    name:'Lazer',         emoji:'🎮', color:'#ec4899' },
   { id:'clothing',   name:'Vestuário',     emoji:'👕', color:'#f97316' },

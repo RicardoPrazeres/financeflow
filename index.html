@@ -14,6 +14,10 @@
   <script src="https://www.gstatic.com/firebasejs/10.10.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.10.0/firebase-auth-compat.js"></script>
+  
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.png">
+  
   <link rel="stylesheet" href="style.css">
 
   <style>
@@ -264,7 +268,7 @@
             <div class="kpi-sub" id="kpiIncomeSub">0 transações</div>
           </div>
           <div class="kpi-card expense">
-            <div class="kpi-icon">❤️</div>
+            <div class="kpi-icon">💸</div>
             <div class="kpi-label">Saídas</div>
             <div class="kpi-value" id="kpiExpense">R$ 0,00</div>
             <div class="kpi-sub" id="kpiExpenseSub">0 transações</div>
@@ -432,7 +436,7 @@
       <!-- TYPE TOGGLE -->
       <div class="type-toggle" id="typeToggle">
         <button class="type-btn active" data-type="expense" onclick="setType('expense')">
-          ❤️ Saída
+          📉 Saída
         </button>
         <button class="type-btn" data-type="income" onclick="setType('income')">
           💚 Entrada
