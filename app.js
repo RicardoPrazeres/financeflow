@@ -1051,16 +1051,21 @@ function renderCards() {
   ];
 
   const html = knownCards.map(c => {
+    // If it's a credit card transaction but has no cardKey (legacy), fallback to 'outro'
+    const isThisCard = (t) => {
+      if (t.type !== 'expense') return false;
+      const isCredit = (t.payment === 'credito');
+      if (t.cardKey) return t.cardKey === c.id;
+      return (isCredit && c.id === 'outro');
+    };
+
     const monthlyAmount = transactions.filter(t => 
-      t.type === 'expense' && 
-      t.cardKey === c.id && 
-      t.date?.startsWith(month)
-    ).reduce((sum, t) => sum + t.amount, 0);
+      isThisCard(t) && t.date?.startsWith(month)
+    ).reduce((sum, t) => sum + (t.installmentTotal || t.amount), 0);
 
     const totalAmount = transactions.filter(t => 
-      t.type === 'expense' && 
-      t.cardKey === c.id
-    ).reduce((sum, t) => sum + t.amount, 0);
+      isThisCard(t)
+    ).reduce((sum, t) => sum + (t.installmentTotal || t.amount), 0);
 
     return `
       <div class="cc-widget cc-${c.id}">
