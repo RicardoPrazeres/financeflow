@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>FinanceFlow — Controle de Gastos</title>
+  <meta name="description" content="Sistema SaaS de controle de gastos pessoais com categorias inteligentes e alertas.">
+  <meta name="theme-color" content="#0f1117">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+
+  <style>
+    /* ── Card selector ── */
+    .card-selector {
+      display: none;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .card-selector.visible { display: flex; }
+
+    .card-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border: 2px solid var(--border, #2a2d3a);
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      background: var(--bg-card, #181c27);
+      color: var(--text, #e2e8f0);
+      transition: border-color .2s, background .2s;
+      user-select: none;
+    }
+    .card-chip:hover { border-color: #6366f1; }
+    .card-chip.selected {
+      border-color: #6366f1;
+      background: rgba(99,102,241,.12);
+    }
+    .card-chip .chip-logo {
+      width: 26px;
+      height: 18px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: -.5px;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .chip-inter  { background: linear-gradient(135deg,#f97316,#ea580c); }
+    .chip-nubank { background: linear-gradient(135deg,#8b5cf6,#6d28d9); }
+    .chip-amazon { background: linear-gradient(135deg,#f59e0b,#d97706); }
+    .chip-outro  { background: linear-gradient(135deg,#64748b,#475569); }
+
+    /* ── Installments ── */
+    .installment-row {
+      display: none;
+      align-items: center;
+      gap: 10px;
+    }
+    .installment-row.visible { display: flex; }
+    .installment-row label { font-size: 13px; color: var(--text-muted, #94a3b8); white-space: nowrap; }
+    .installment-row select { flex: 1; }
+    .installment-preview {
+      display: none;
+      font-size: 12px;
+      color: var(--text-muted, #94a3b8);
+      margin-top: 4px;
+      padding: 6px 10px;
+      background: rgba(99,102,241,.08);
+      border-radius: 6px;
+      border-left: 3px solid #6366f1;
+    }
+    .installment-preview.visible { display: block; }
+
+    /* ── Badge de parcela na listagem ── */
+    .tx-installment-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: rgba(99,102,241,.15);
+      color: #818cf8;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .tx-installment-detail {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 5px;
+    }
+    .tx-inst-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+    .tx-inst-chip.parcela { background: rgba(99,102,241,.13); color: #818cf8; }
+    .tx-inst-chip.total   { background: rgba(239,68,68,.10);  color: #f87171; }
+    .tx-inst-chip.prog    { background: rgba(148,163,184,.10); color: #94a3b8; }
+    .tx-card-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+    .tx-card-inter  { background: rgba(249,115,22,.15);  color: #fb923c; }
+    .tx-card-nubank { background: rgba(139,92,246,.15);  color: #a78bfa; }
+    .tx-card-amazon { background: rgba(245,158,11,.15);  color: #fbbf24; }
+    .tx-card-outro  { background: rgba(100,116,139,.15); color: #94a3b8; }
+
+    /* ── Form helpers ── */
+    .form-label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .toggle-installment {
+      font-size: 12px;
+      color: #6366f1;
+      cursor: pointer;
+      text-decoration: underline;
+      background: none;
+      border: none;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- SIDEBAR OVERLAY -->
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">💰</div>
+      <div>
+        <div class="brand-name">FinanceFlow</div>
+        <div class="brand-sub">Controle Pessoal</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-section">Principal</div>
+      <a class="nav-item active" data-section="dashboard" href="#">
+        <span class="nav-icon">📊</span> Dashboard
+      </a>
+      <a class="nav-item" data-section="transactions" href="#">
+        <span class="nav-icon">🧾</span> Transações
+      </a>
+      <a class="nav-item" data-section="cards" href="#">
+        <span class="nav-icon">💳</span> Cartões
+      </a>
+      <a class="nav-item" data-section="budgets" href="#">
+        <span class="nav-icon">🎯</span> Orçamentos
+      </a>
+      <a class="nav-item" data-section="reports" href="#">
+        <span class="nav-icon">📈</span> Relatórios
+      </a>
+
+      <div class="nav-section">Configurações</div>
+      <a class="nav-item" data-section="settings" href="#">
+        <span class="nav-icon">⚙️</span> Preferências
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="balance-widget">
+        <div class="balance-label">Saldo Atual</div>
+        <div class="balance-value" id="sidebarBalance">R$ 0,00</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div id="main">
+
+    <!-- TOPBAR -->
+    <header id="topbar">
+      <div class="topbar-left">
+        <button class="hamburger" id="hamburgerBtn">☰</button>
+        <div class="topbar-title" id="topbarTitle">Dashboard</div>
+      </div>
+      <div class="topbar-right">
+        <div class="alert-bell" id="alertBell" title="Alertas">
+          🔔
+          <span class="alert-count" id="alertCount" style="display:none">0</span>
+        </div>
+        <button class="btn btn-primary" id="btnAddTransaction" onclick="openModal()">
+          <span>+</span> <span class="btn-label">Nova Transação</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ALERTS PANEL -->
+    <div id="alertsPanel" style="display:none">
+      <div class="alerts-header">
+        <strong>⚠️ Alertas</strong>
+        <button onclick="closeAlerts()">✕</button>
+      </div>
+      <div id="alertsList"></div>
+    </div>
+
+    <!-- CONTENT -->
+    <main id="content">
+
+      <!-- ═══ DASHBOARD ═══ -->
+      <section id="sec-dashboard" class="section active">
+        <div class="section-header">
+          <h1 class="section-title">Dashboard</h1>
+          <div class="period-selector">
+            <select id="dashPeriod">
+              <option value="month">Este Mês</option>
+              <option value="last3">Últimos 3 Meses</option>
+              <option value="year">Este Ano</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- KPIs -->
+        <div class="kpi-grid" id="kpiGrid">
+          <div class="kpi-card income">
+            <div class="kpi-icon">💚</div>
+            <div class="kpi-label">Entradas</div>
+            <div class="kpi-value" id="kpiIncome">R$ 0,00</div>
+            <div class="kpi-sub" id="kpiIncomeSub">0 transações</div>
+          </div>
+          <div class="kpi-card expense">
+            <div class="kpi-icon">❤️</div>
+            <div class="kpi-label">Saídas</div>
+            <div class="kpi-value" id="kpiExpense">R$ 0,00</div>
+            <div class="kpi-sub" id="kpiExpenseSub">0 transações</div>
+          </div>
+          <div class="kpi-card balance">
+            <div class="kpi-icon">💼</div>
+            <div class="kpi-label">Saldo</div>
+            <div class="kpi-value" id="kpiBalance">R$ 0,00</div>
+            <div class="kpi-sub" id="kpiBalanceSub">No período</div>
+          </div>
+          <div class="kpi-card savings">
+            <div class="kpi-icon">🏦</div>
+            <div class="kpi-label">Taxa de Economia</div>
+            <div class="kpi-value" id="kpiSavings">0%</div>
+            <div class="kpi-sub">do total de entradas</div>
+          </div>
+        </div>
+
+        <!-- CHARTS ROW -->
+        <div class="charts-row">
+          <div class="chart-card wide-chart">
+            <div class="chart-title">Fluxo Mensal <span>entradas vs saídas</span></div>
+            <div class="chart-wrap"><canvas id="chartMonthly"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Por Categoria</div>
+            <div class="chart-wrap donut-wrap"><canvas id="chartCategory"></canvas></div>
+            <div id="categoryLegend" class="chart-legend"></div>
+          </div>
+        </div>
+
+        <!-- BUDGET OVERVIEW -->
+        <div class="card" id="budgetOverviewCard">
+          <div class="card-header">
+            <h3>Orçamentos do Mês</h3>
+            <button class="btn btn-ghost btn-sm" data-section="budgets" onclick="navigate('budgets')">Ver todos</button>
+          </div>
+          <div id="budgetBars"></div>
+        </div>
+
+        <!-- RECENT TRANSACTIONS -->
+        <div class="card">
+          <div class="card-header">
+            <h3>Transações Recentes</h3>
+            <button class="btn btn-ghost btn-sm" onclick="navigate('transactions')">Ver todas</button>
+          </div>
+          <div id="recentList" class="tx-list"></div>
+        </div>
+      </section>
+
+      <!-- ═══ TRANSACTIONS ═══ -->
+      <section id="sec-transactions" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Transações</h1>
+          <button class="btn btn-primary" onclick="openModal()">+ Nova</button>
+        </div>
+
+        <!-- FILTERS -->
+        <div class="filters-bar">
+          <input type="month" id="filterMonth" class="filter-input">
+          <select id="filterType" class="filter-input">
+            <option value="">Todos os tipos</option>
+            <option value="income">Entradas</option>
+            <option value="expense">Saídas</option>
+          </select>
+          <select id="filterCategory" class="filter-input">
+            <option value="">Todas as categorias</option>
+          </select>
+          <input type="text" id="filterSearch" class="filter-input" placeholder="🔍 Buscar...">
+          <button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ CSV</button>
+        </div>
+
+        <div class="card">
+          <div id="txList" class="tx-list"></div>
+          <div id="txEmpty" class="empty-state" style="display:none">
+            <div class="empty-icon">💳</div>
+            <p>Nenhuma transação encontrada</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ CARDS ═══ -->
+      <section id="sec-cards" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Cartões</h1>
+        </div>
+
+        <div class="filters-bar" style="justify-content: flex-start; margin-bottom: 20px;">
+          <input type="month" id="filterMonthCards" class="filter-input">
+        </div>
+
+        <div id="cardsGrid" class="cards-grid"></div>
+      </section>
+
+      <!-- ═══ BUDGETS ═══ -->
+      <section id="sec-budgets" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Orçamentos</h1>
+          <button class="btn btn-primary" onclick="openBudgetModal()">+ Novo</button>
+        </div>
+        <div id="budgetGrid" class="budget-grid"></div>
+      </section>
+
+      <!-- ═══ REPORTS ═══ -->
+      <section id="sec-reports" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Relatórios</h1>
+        </div>
+        <div class="charts-row">
+          <div class="chart-card wide-chart">
+            <div class="chart-title">Evolução Anual</div>
+            <div class="chart-wrap"><canvas id="chartAnnual"></canvas></div>
+          </div>
+        </div>
+        <div class="charts-row">
+          <div class="chart-card">
+            <div class="chart-title">Top Categorias (Gastos)</div>
+            <div class="chart-wrap"><canvas id="chartTopCat"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">Tendência de Saldo</div>
+            <div class="chart-wrap"><canvas id="chartTrend"></canvas></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Resumo por Categoria</h3></div>
+          <div id="reportTable"></div>
+        </div>
+      </section>
+
+      <!-- ═══ SETTINGS ═══ -->
+      <section id="sec-settings" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Preferências</h1>
+        </div>
+        <div class="card" style="max-width:520px">
+          <h3 style="margin-bottom:20px;font-size:15px">Categorias Personalizadas</h3>
+          <div id="categoryList" class="cat-list"></div>
+          <div class="add-cat-row">
+            <input type="text" id="newCatName" placeholder="Nome da categoria" class="filter-input">
+            <input type="color" id="newCatColor" value="#6366f1" style="width:44px;height:44px;border:2px solid var(--border);border-radius:8px;cursor:pointer;background:none">
+            <button class="btn btn-primary btn-sm" onclick="addCustomCategory()">Adicionar</button>
+          </div>
+          <hr class="divider">
+          <h3 style="margin-bottom:16px;font-size:15px">Dados</h3>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ Exportar CSV</button>
+            <button class="btn btn-danger btn-sm" onclick="clearAllData()">🗑 Limpar Todos os Dados</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ═══ MODAL: TRANSACTION ═══ -->
+  <div class="modal-overlay" id="txModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modalTitle">Nova Transação</h2>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+
+      <!-- TYPE TOGGLE -->
+      <div class="type-toggle" id="typeToggle">
+        <button class="type-btn active" data-type="expense" onclick="setType('expense')">
+          ❤️ Saída
+        </button>
+        <button class="type-btn" data-type="income" onclick="setType('income')">
+          💚 Entrada
+        </button>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group full">
+          <label class="form-label">Descrição</label>
+          <input type="text" id="fDesc" class="form-input" placeholder="Ex: Supermercado, Salário..." oninput="autoCategory()">
+          <div id="catSuggestion" class="cat-suggestion" style="display:none"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Valor (R$)</label>
+          <input type="number" id="fAmount" class="form-input" placeholder="0,00" min="0" step="0.01" oninput="updateInstallmentPreview()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Data</label>
+          <input type="date" id="fDate" class="form-input">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Categoria</label>
+          <select id="fCategory" class="form-input"></select>
+        </div>
+
+        <!-- ── PAGAMENTO ── -->
+        <div class="form-group full">
+          <label class="form-label">Forma de Pagamento</label>
+          <select id="fPayment" class="form-input" onchange="onPaymentChange()">
+            <option value="credito">💳 Cartão de Crédito</option>
+            <option value="debito">🏦 Débito</option>
+            <option value="dinheiro">💵 Dinheiro</option>
+            <option value="pix">📱 Pix</option>
+            <option value="transferencia">🔄 Transferência</option>
+          </select>
+        </div>
+
+        <!-- ── SELEÇÃO DE CARTÃO (aparece só quando Crédito/Débito) ── -->
+        <div class="form-group full" id="cardSelectorGroup" style="display:none">
+          <label class="form-label">Qual cartão?</label>
+          <div class="card-selector visible" id="cardSelector">
+            <div class="card-chip selected" data-card="inter" onclick="selectCard('inter')">
+              <div class="chip-logo chip-inter">IN</div>
+              Inter
+            </div>
+            <div class="card-chip" data-card="nubank" onclick="selectCard('nubank')">
+              <div class="chip-logo chip-nubank">Nu</div>
+              Nubank
+            </div>
+            <div class="card-chip" data-card="amazon" onclick="selectCard('amazon')">
+              <div class="chip-logo chip-amazon">Az</div>
+              Amazon
+            </div>
+            <div class="card-chip" data-card="outro" onclick="selectCard('outro')">
+              <div class="chip-logo chip-outro">+</div>
+              Outro
+            </div>
+          </div>
+        </div>
+
+        <!-- ── PARCELAMENTO (aparece só quando Crédito) ── -->
+        <div class="form-group full" id="installmentGroup" style="display:none">
+          <div class="form-label-row">
+            <label class="form-label">Parcelamento</label>
+          </div>
+          <div class="installment-row visible" id="installmentRow">
+            <label>Nº de parcelas:</label>
+            <select id="fInstallments" class="form-input" onchange="updateInstallmentPreview()">
+              <option value="1">À vista</option>
+              <option value="2">2x</option>
+              <option value="3">3x</option>
+              <option value="4">4x</option>
+              <option value="5">5x</option>
+              <option value="6">6x</option>
+              <option value="7">7x</option>
+              <option value="8">8x</option>
+              <option value="9">9x</option>
+              <option value="10">10x</option>
+              <option value="11">11x</option>
+              <option value="12">12x</option>
+              <option value="18">18x</option>
+              <option value="24">24x</option>
+            </select>
+          </div>
+          <div class="installment-preview" id="installmentPreview"></div>
+        </div>
+
+        <div class="form-group full">
+          <label class="form-label">Observações</label>
+          <textarea id="fNotes" class="form-input" rows="2" placeholder="Opcional..."></textarea>
+        </div>
+        <div class="form-group full">
+          <label class="checkbox-label">
+            <input type="checkbox" id="fRecurring"> Transação recorrente (mensal)
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="saveTransaction()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ MODAL: BUDGET ═══ -->
+  <div class="modal-overlay" id="budgetModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Definir Orçamento</h2>
+        <button class="modal-close" onclick="closeBudgetModal()">✕</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group full">
+          <label class="form-label">Categoria</label>
+          <select id="bCategory" class="form-input"></select>
+        </div>
+        <div class="form-group full">
+          <label class="form-label">Limite Mensal (R$)</label>
+          <input type="number" id="bLimit" class="form-input" placeholder="0,00" min="0" step="0.01">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeBudgetModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="saveBudget()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast" class="toast"></div>
+
+  <!-- ── PATCH: card + installment logic ── -->
+  <script>
+    /* ─── State ─── */
+    let _selectedCard = 'inter'; // default
+
+    /* ─── Payment change ─── */
+    function onPaymentChange() {
+      const payment = document.getElementById('fPayment').value;
+      const cardGroup      = document.getElementById('cardSelectorGroup');
+      const installGroup   = document.getElementById('installmentGroup');
+      const installPreview = document.getElementById('installmentPreview');
+
+      if (payment === 'credito' || payment === 'debito') {
+        cardGroup.style.display = '';
+        // only credit allows installments
+        installGroup.style.display = payment === 'credito' ? '' : 'none';
+      } else {
+        cardGroup.style.display = 'none';
+        installGroup.style.display = 'none';
+        installPreview.classList.remove('visible');
+      }
+      updateInstallmentPreview();
+    }
+
+    /* ─── Card selection ─── */
+    function selectCard(card) {
+      _selectedCard = card;
+      document.querySelectorAll('.card-chip').forEach(c => {
+        c.classList.toggle('selected', c.dataset.card === card);
+      });
+    }
+
+    /* ─── Installment preview ─── */
+    function updateInstallmentPreview() {
+      const amount    = parseFloat(document.getElementById('fAmount').value) || 0;
+      const installEl = document.getElementById('fInstallments');
+      const preview   = document.getElementById('installmentPreview');
+
+      if (!installEl || document.getElementById('installmentGroup').style.display === 'none') {
+        preview.classList.remove('visible');
+        return;
+      }
+
+      const n = parseInt(installEl.value) || 1;
+      if (n <= 1 || amount === 0) {
+        preview.classList.remove('visible');
+        return;
+      }
+
+      const parcela = amount / n;
+      preview.innerHTML =
+        `<strong>${n}x de ${fmt(parcela)}</strong> &nbsp;·&nbsp; Total: ${fmt(amount)}`;
+      preview.classList.add('visible');
+    }
+
+    function fmt(v) {
+      return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    /* ─── Override saveTransaction to capture card + installments ─── */
+    document.addEventListener('DOMContentLoaded', () => {
+      // After app.js is loaded, patch saveTransaction
+      const origSave = window.saveTransaction;
+      window.saveTransaction = function() {
+        // inject extra fields before original save runs
+        const payment    = document.getElementById('fPayment').value;
+        const installEl  = document.getElementById('fInstallments');
+        const n          = (payment === 'credito' && installEl) ? parseInt(installEl.value) || 1 : 1;
+        const amount     = parseFloat(document.getElementById('fAmount').value) || 0;
+
+        // Store extras in hidden data attributes read by the patched render
+        window._pendingCard         = (payment === 'credito' || payment === 'debito') ? _selectedCard : null;
+        window._pendingInstallments = n;
+        window._pendingInstallTotal = amount;
+        window._pendingInstallValue = n > 1 ? (amount / n) : amount;
+
+        origSave.apply(this, arguments);
+      };
+
+      /* Reset modal extras on open */
+      const origOpen = window.openModal;
+      window.openModal = function() {
+        origOpen && origOpen.apply(this, arguments);
+        // reset card selector
+        selectCard('inter');
+        // reset installments
+        const inst = document.getElementById('fInstallments');
+        if (inst) inst.value = '1';
+        document.getElementById('installmentPreview').classList.remove('visible');
+        // trigger payment change to set initial visibility
+        onPaymentChange();
+      };
+
+      // Init on load
+      onPaymentChange();
+    });
+  </script>
+
+  <!-- PATCH 2: enrich transaction rendering to show card + installment info -->
+  <script>
+    /* 
+      This patch hooks into the app.js transaction-saving pipeline.
+      It stores card and installment metadata on each transaction object,
+      and patches the render functions to display them.
+    */
+
+    /* We intercept localStorage writes to embed the extra data */
+    const _origSetItem = localStorage.setItem.bind(localStorage);
+
+    /* Utility: get card label */
+    function getCardLabel(cardKey) {
+      const map = { inter:'Inter', nubank:'Nubank', amazon:'Amazon', outro:'Outro' };
+      return map[cardKey] || cardKey;
+    }
+    function getCardClass(cardKey) {
+      return 'tx-card-' + (cardKey || 'outro');
+    }
+
+    /* 
+      After DOMContentLoaded, wrap the original saveTransaction so we can
+      tag the last saved transaction with card/installment data.
+    */
+    document.addEventListener('DOMContentLoaded', () => {
+      // Give app.js a tick to load
+      setTimeout(() => {
+        const origSave2 = window.saveTransaction;
+        window.saveTransaction = function() {
+          // Capture values BEFORE app.js save (form is still populated)
+          const payment  = document.getElementById('fPayment')?.value;
+          const n        = parseInt(document.getElementById('fInstallments')?.value) || 1;
+          const amount   = parseFloat(document.getElementById('fAmount')?.value) || 0;
+          const editingId = window._editingId || null; // track if editing
+
+          // If parcelado (credito + n>1), temporarily set the amount field to
+          // the installment value so app.js saves the correct per-parcel amount
+          const amountInput = document.getElementById('fAmount');
+          if (payment === 'credito' && n > 1 && amountInput) {
+            amountInput.value = (amount / n).toFixed(2);
+          }
+
+          origSave2.apply(this, arguments);
+
+          // Restore original amount in the field (for UI consistency)
+          if (payment === 'credito' && n > 1 && amountInput) {
+            amountInput.value = amount;
+          }
+
+          // Now tag the saved transaction with installment/card metadata
+          try {
+            const raw = localStorage.getItem('ff_transactions'); // chave correta
+            if (!raw) return;
+            const txs = JSON.parse(raw);
+            if (!txs.length) return;
+
+            // Find the transaction: if editing use editingId, else use last
+            let tx;
+            if (editingId) {
+              tx = txs.find(t => t.id === editingId);
+            } else {
+              tx = txs[txs.length - 1];
+            }
+            if (!tx) return;
+
+            if (payment === 'credito' || payment === 'debito') {
+              tx.cardKey   = _selectedCard;
+              tx.cardLabel = getCardLabel(_selectedCard);
+            } else {
+              delete tx.cardKey;
+              delete tx.cardLabel;
+            }
+
+            if (payment === 'credito' && n > 1) {
+              tx.installments     = n;
+              tx.installmentPaid  = tx.installmentPaid || 1;
+              tx.installmentValue = +(amount / n).toFixed(2);
+              tx.installmentTotal = amount;
+              // ensure stored amount is per-parcel
+              tx.amount           = tx.installmentValue;
+            } else {
+              // À vista or non-credit: clear installment fields, restore full amount
+              delete tx.installments;
+              delete tx.installmentPaid;
+              delete tx.installmentValue;
+              delete tx.installmentTotal;
+              tx.amount = amount;
+            }
+
+            localStorage.setItem('ff_transactions', JSON.stringify(txs)); // chave correta
+          } catch(e) { console.warn('patch err', e); }
+        };
+
+        /* ── Patch openModal to restore installment/card data when editing ── */
+        const origOpenModal = window.openModal;
+        window.openModal = function(id) {
+          origOpenModal && origOpenModal.apply(this, arguments);
+
+          if (id) {
+            window._editingId = id;
+            // 150ms ensures app.js finishes populating the form before we restore
+            setTimeout(() => restoreEditFields(id), 200);
+          } else {
+            window._editingId = null;
+          }
+        };
+
+        function restoreEditFields(id) {
+          try {
+            const raw = localStorage.getItem('ff_transactions'); // chave correta
+            if (!raw) return;
+            const txs = JSON.parse(raw);
+            const tx  = txs.find(t => String(t.id) === String(id));
+            if (!tx) return;
+
+            // 1. Restaurar forma de pagamento ANTES de chamar onPaymentChange
+            const payEl = document.getElementById('fPayment');
+            if (payEl && tx.payment) {
+              payEl.value = tx.payment;
+            }
+
+            // 2. Atualizar visibilidade de cartão/parcelamento
+            onPaymentChange();
+
+            // 3. Restaurar cartão selecionado
+            if (tx.cardKey) selectCard(tx.cardKey);
+
+            // 4. Restaurar parcelas
+            const installEl = document.getElementById('fInstallments');
+            if (installEl && tx.installments && tx.installments > 1) {
+              installEl.value = String(tx.installments);
+              // Mostrar valor total no campo (não por parcela)
+              const amountInput = document.getElementById('fAmount');
+              if (amountInput && tx.installmentTotal) {
+                amountInput.value = tx.installmentTotal;
+              }
+              updateInstallmentPreview();
+            } else if (installEl) {
+              installEl.value = '1';
+              updateInstallmentPreview();
+            }
+          } catch(e) { console.warn('edit restore err', e); }
+        }
+
+        /* Patch the transaction row renderer */
+        patchTxRenderer();
+      }, 200);
+    });
+
+    function patchTxRenderer() {
+      /* 
+        app.js renders tx rows via innerHTML. We intercept after renders 
+        by using a MutationObserver on the tx lists to annotate rows.
+      */
+      const targets = ['txList','recentList'];
+      targets.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        new MutationObserver(() => annotateTxRows(id)).observe(el, { childList: true, subtree: true });
+      });
+    }
+
+    function annotateTxRows(listId) {
+      try {
+        const raw = localStorage.getItem('ff_transactions'); // chave correta
+        if (!raw) return;
+        const txs = JSON.parse(raw);
+        const txMap = {};
+        txs.forEach(t => { txMap[t.id] = t; });
+
+        const rows = document.querySelectorAll(`#${listId} .tx-item`);
+        rows.forEach(row => {
+          // Extrai o id do atributo onclick: openModal('XXXX')
+          const onclickAttr = row.getAttribute('onclick') || '';
+          const match = onclickAttr.match(/openModal\('([^']+)'\)/);
+          if (!match) return;
+          const tx = txMap[match[1]];
+          if (!tx) return;
+          if (row.dataset.annotated) return; // already done
+          row.dataset.annotated = '1';
+
+          const metaEl = row.querySelector('.tx-meta') || row.querySelector('.tx-sub') || row.querySelector('small');
+          if (!metaEl) return;
+
+          // Card badge
+          if (tx.cardKey) {
+            const badge = document.createElement('span');
+            badge.className = `tx-card-badge ${getCardClass(tx.cardKey)}`;
+            badge.textContent = tx.cardLabel || tx.cardKey;
+            metaEl.appendChild(badge);
+          }
+
+          // Installment badge + detail chips
+          if (tx.installments && tx.installments > 1) {
+            const paid      = tx.installmentPaid || 1;
+            const remaining = tx.installments - paid;
+
+            // Badge inline na linha de meta
+            const badge = document.createElement('span');
+            badge.className = 'tx-installment-badge';
+            badge.textContent = `${paid}/${tx.installments}x`;
+            metaEl.appendChild(badge);
+
+            // Chips informativos abaixo
+            const detail = document.createElement('div');
+            detail.className = 'tx-installment-detail';
+            detail.innerHTML =
+              `<span class="tx-inst-chip parcela">` +
+                `💳 ${fmt2(tx.installmentValue)}/parcela` +
+              `</span>` +
+              `<span class="tx-inst-chip total">` +
+                `Total ${fmt2(tx.installmentTotal)}` +
+              `</span>` +
+              `<span class="tx-inst-chip prog">` +
+                `Faltam ${remaining}x` +
+              `</span>`;
+            row.appendChild(detail);
+          }
+        });
+      } catch(e) { console.warn('annotate err', e); }
+    }
+
+    function fmt2(v) {
+      return Number(v).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+    }
+  </script>
+
+  <script src="app.js"></script>
+</body>
+</html>
