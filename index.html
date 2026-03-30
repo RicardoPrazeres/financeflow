@@ -256,7 +256,7 @@
           <span>📷</span> <span class="btn-label">Escanear Nota</span>
         </button>
         <input type="file" id="receiptFileInput" accept="image/*" capture="environment" style="display:none" onchange="handleReceiptImage(event)">
-        <button class="btn btn-primary" id="btnAddTransaction">
+        <button class="btn btn-primary" id="btnAddTransaction" onclick="openModal()">
           <span>+</span> <span class="btn-label">Nova Transação</span>
         </button>
       </div>
@@ -351,7 +351,7 @@
       <section id="sec-transactions" class="section">
         <div class="section-header">
           <h1 class="section-title">Transações</h1>
-          <button class="btn btn-primary">+ Nova</button>
+          <button class="btn btn-primary" onclick="openModal()">+ Nova</button>
         </div>
 
         <!-- FILTERS -->

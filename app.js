@@ -334,7 +334,6 @@ function setupEventListeners() {
   });
   document.getElementById('hamburgerBtn').addEventListener('click', toggleSidebar);
   document.getElementById('sidebarOverlay').addEventListener('click', closeSidebar);
-  document.getElementById('btnAddTransaction').addEventListener('click', openModal);
   document.getElementById('alertBell').addEventListener('click', toggleAlerts);
   document.getElementById('dashPeriod').addEventListener('change', renderDashboard);
   ['filterMonth','filterType','filterCategory','filterSearch'].forEach(id => {
