@@ -527,6 +527,42 @@ body::after{
 .tx-item:last-child{border-bottom:none;}
 .tx-item:hover{background:var(--surface2);}
 
+.tx-list-header { display: none; }
+.desktop-col { display: none; }
+
+@media(min-width: 800px) {
+  .tx-item.tx-item-wide {
+    display: grid;
+    grid-template-columns: 40px minmax(130px, 2fr) minmax(110px, 1.5fr) 90px minmax(140px, 1.5fr) 110px 60px;
+    align-items: center;
+    gap: 14px;
+  }
+  .tx-item.tx-item-wide .mobile-col { display: none; }
+  .tx-item.tx-item-wide .desktop-col { display: block; font-size: 13px; color: var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tx-item.tx-item-wide .tc-desc { font-weight: 500; font-size: 14px; }
+  .tx-item.tx-item-wide .tc-cat { color: var(--text2); display:flex; align-items:center; gap:6px; }
+  .tx-item.tx-item-wide .tc-date { color: var(--text2); }
+  .tx-item.tx-item-wide .tc-pay { color: var(--text2); display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .tx-item.tx-item-wide .tc-amt { text-align: right; }
+  .tx-item.tx-item-wide .tc-acts { justify-self: end; }
+  .tx-item.tx-item-wide .tx-amount { justify-self: end; width: 100%; text-align: right; }
+
+  .tx-list-header {
+    display: grid;
+    grid-template-columns: 40px minmax(130px, 2fr) minmax(110px, 1.5fr) 90px minmax(140px, 1.5fr) 110px 60px;
+    gap: 14px;
+    align-items: center;
+    padding: 10px 20px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text3);
+    letter-spacing: 0.5px;
+  }
+}
+
 .tx-icon{
   width:40px;height:40px;
   border-radius:10px;

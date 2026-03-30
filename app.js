@@ -793,7 +793,16 @@ function renderTransactions() {
     empty.style.display = 'block';
   } else {
     empty.style.display = 'none';
-    el.innerHTML = list.map(t => txItemHTML(t, true)).join('');
+    const header = `<div class="tx-list-header">
+      <div class="tc-icon"></div>
+      <div class="tc-desc">Descrição</div>
+      <div class="tc-cat">Categoria</div>
+      <div class="tc-date">Data</div>
+      <div class="tc-pay">Pagamento</div>
+      <div class="tc-amt">Valor</div>
+      <div class="tc-acts"></div>
+    </div>`;
+    el.innerHTML = header + list.map(t => txItemHTML(t, true)).join('');
   }
 }
 
@@ -822,15 +831,19 @@ function txItemHTML(t, showActions=false) {
   // Card badge
   const cardBadge = t.cardLabel ? `<span class="tx-card-badge tx-card-${t.cardKey || 'outro'}">${t.cardLabel}</span>` : '';
 
-  return `<div class="tx-item" onclick="openModal('${t.id}')">
+  return `<div class="tx-item ${showActions ? 'tx-item-wide' : ''}" onclick="openModal('${t.id}')">
     <div class="tx-icon" style="background:${cat.color}22">${cat.emoji}</div>
-    <div class="tx-info">
+    <div class="tx-info mobile-col">
       <div class="tx-desc">${esc(t.desc)}${t.recurring?' 🔄':''}</div>
       <div class="tx-meta">${cat.name} · ${dateStr} · ${t.payment}${cardBadge}${installBadge}</div>
       ${installDetail}
     </div>
-    <div class="tx-amount ${t.type}">${t.type==='income'?'+':'-'}R$ ${fmt(t.installmentValue || t.amount)}</div>
-    ${actions}
+    <div class="desktop-col tc-desc" title="${esc(t.desc)}">${esc(t.desc)}${t.recurring?' 🔄':''}</div>
+    <div class="desktop-col tc-cat">${cat.emoji ? cat.emoji + ' ' : ''}${cat.name}</div>
+    <div class="desktop-col tc-date">${dateStr}</div>
+    <div class="desktop-col tc-pay">${t.payment}${cardBadge}${installBadge} ${installDetail}</div>
+    <div class="tx-amount tc-amt ${t.type}">${t.type==='income'?'+':'-'}R$ ${fmt(t.installmentValue || t.amount)}</div>
+    <div class="${showActions ? 'tc-acts' : ''}">${actions}</div>
   </div>`;
 }
 
