@@ -479,24 +479,79 @@ function saveTransaction() {
 
   if (editingId) {
     const idx = transactions.findIndex(t => t.id === editingId);
-    const existingPaid = transactions[idx].installmentPaid || 1;
-    const installData = n > 1 ? {
-      installments:     n,
-      installmentPaid:  existingPaid,
-      installmentValue: savedAmount,
-      installmentTotal: totalAmt,
-    } : {
-      installments:     null,
-      installmentPaid:  null,
-      installmentValue: null,
-      installmentTotal: null,
-    };
-    transactions[idx] = {
-      ...transactions[idx],
-      type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
-      cardKey, cardLabel,
-      ...installData,
-    };
+    if (idx === -1) { closeModal(); return; }
+    
+    const oldTx = transactions[idx];
+    const gid = oldTx.installmentGroupId;
+
+    if (gid) {
+      // Era um grupo. Vamos recalcular a data de início (mês 1) com base na transação editada
+      const [y, m, d] = date.split('-').map(Number);
+      const dObj = new Date(y, m - 1 - (oldTx.installmentPaid - 1), d);
+      const startDate = dObj.getFullYear() + '-' + String(dObj.getMonth() + 1).padStart(2, '0') + '-' + String(dObj.getDate()).padStart(2, '0');
+
+      // Remove todo o grupo antigo
+      transactions = transactions.filter(t => t.installmentGroupId !== gid);
+
+      if (n > 1) {
+        // Recria o grupo com os novos dados e quantidade de parcelas (n)
+        const [yy, mm, dd] = startDate.split('-').map(Number);
+        for (let i = 1; i <= n; i++) {
+          let loopDateStr = startDate;
+          if (i > 1) {
+            const di = new Date(yy, mm - 1 + (i - 1), dd);
+            const targetMonth = ((mm - 1 + (i - 1)) % 12 + 12) % 12;
+            if (di.getMonth() !== targetMonth) di.setDate(0); 
+            loopDateStr = di.getFullYear() + '-' + String(di.getMonth() + 1).padStart(2, '0') + '-' + String(di.getDate()).padStart(2, '0');
+          }
+          transactions.push({
+            id:uid(), type:currentType, desc, amount:savedAmount, date:loopDateStr, cat, payment, notes, recurring,
+            cardKey, cardLabel,
+            installments: n, installmentPaid: i, installmentValue: savedAmount, installmentTotal: totalAmt,
+            installmentGroupId: gid, createdAt:new Date().toISOString()
+          });
+        }
+      } else {
+        // Mudou de parcelado para único. Já removemos o grupo, agora adicionamos apenas este
+        transactions.push({
+          id:uid(), type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
+          cardKey, cardLabel,
+          installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null,
+          createdAt:new Date().toISOString()
+        });
+      }
+    } else {
+      // Era uma transação individual
+      if (n > 1) {
+        // Mudou de individual para parcelado
+        transactions.splice(idx, 1);
+        const newGid = uid();
+        const [yy, mm, dd] = date.split('-').map(Number);
+        for (let i = 1; i <= n; i++) {
+          let loopDateStr = date;
+          if (i > 1) {
+            const di = new Date(yy, mm - 1 + (i - 1), dd);
+            const targetMonth = ((mm - 1 + (i - 1)) % 12 + 12) % 12;
+            if (di.getMonth() !== targetMonth) di.setDate(0); 
+            loopDateStr = di.getFullYear() + '-' + String(di.getMonth() + 1).padStart(2, '0') + '-' + String(di.getDate()).padStart(2, '0');
+          }
+          transactions.push({
+            id:uid(), type:currentType, desc, amount:savedAmount, date:loopDateStr, cat, payment, notes, recurring,
+            cardKey, cardLabel,
+            installments: n, installmentPaid: i, installmentValue: savedAmount, installmentTotal: totalAmt,
+            installmentGroupId: newGid, createdAt:new Date().toISOString()
+          });
+        }
+      } else {
+        // Apenas atualiza a individual
+        transactions[idx] = {
+          ...transactions[idx],
+          type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
+          cardKey, cardLabel,
+          installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null
+        };
+      }
+    }
     showToast('Transação atualizada ✓', 'success');
   } else {
     // Se for parcelado, cria 'n' transações para os meses seguintes
