@@ -799,6 +799,7 @@ function renderTransactions() {
       <div class="tc-cat">Categoria</div>
       <div class="tc-date">Data</div>
       <div class="tc-pay">Pagamento</div>
+      <div class="tc-notes">Notas</div>
       <div class="tc-amt">Valor</div>
       <div class="tc-acts"></div>
     </div>`;
@@ -842,6 +843,7 @@ function txItemHTML(t, showActions=false) {
     <div class="desktop-col tc-cat">${cat.emoji ? cat.emoji + ' ' : ''}${cat.name}</div>
     <div class="desktop-col tc-date">${dateStr}</div>
     <div class="desktop-col tc-pay">${t.payment}${cardBadge}${installBadge} ${installDetail}</div>
+    <div class="desktop-col tc-notes" title="${esc(t.notes || '')}">${esc(t.notes || '-')}</div>
     <div class="tx-amount tc-amt ${t.type}">${t.type==='income'?'+':'-'}R$ ${fmt(t.installmentValue || t.amount)}</div>
     <div class="${showActions ? 'tc-acts' : ''}">${actions}</div>
   </div>`;
