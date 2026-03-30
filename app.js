@@ -467,7 +467,6 @@ function saveTransaction() {
   const notes     = document.getElementById('fNotes').value.trim();
   const recurring = document.getElementById('fRecurring').checked;
 
-  // Installment/card data from the DOM (set by the patch script)
   const installEl  = document.getElementById('fInstallments');
   const n          = (payment === 'credito' && installEl) ? (parseInt(installEl.value) || 1) : 1;
   const cardKey    = (payment === 'credito' || payment === 'debito') ? (window._selectedCard || 'outro') : null;
@@ -477,35 +476,33 @@ function saveTransaction() {
   if (!totalAmt || totalAmt <= 0) { showToast('Informe um valor válido', 'error'); return; }
   if (!date)   { showToast('Informe a data', 'error'); return; }
 
-  // If installments > 1 save per-installment amount, keep total metadata
   const savedAmount = n > 1 ? +(totalAmt / n).toFixed(2) : totalAmt;
-  const installData = n > 1 ? {
-    installments:     n,
-    installmentPaid:  1,
-    installmentValue: savedAmount,
-    installmentTotal: totalAmt,
-  } : {
-    installments:     null,
-    installmentPaid:  null,
-    installmentValue: null,
-    installmentTotal: null,
-  };
 
   if (editingId) {
     const idx = transactions.findIndex(t => t.id === editingId);
     const existingPaid = transactions[idx].installmentPaid || 1;
+    const installData = n > 1 ? {
+      installments:     n,
+      installmentPaid:  existingPaid,
+      installmentValue: savedAmount,
+      installmentTotal: totalAmt,
+    } : {
+      installments:     null,
+      installmentPaid:  null,
+      installmentValue: null,
+      installmentTotal: null,
+    };
     transactions[idx] = {
       ...transactions[idx],
       type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
       cardKey, cardLabel,
       ...installData,
-      // preserve installmentPaid if already set
-      installmentPaid: n > 1 ? existingPaid : null,
     };
     showToast('Transação atualizada ✓', 'success');
   } else {
     // Se for parcelado, cria 'n' transações para os meses seguintes
     if (n > 1) {
+      const groupId = uid();
       const [yy, mm, dd] = date.split('-').map(Number);
       
       for (let i = 1; i <= n; i++) {
@@ -527,15 +524,16 @@ function saveTransaction() {
           installmentPaid: i,
           installmentValue: savedAmount,
           installmentTotal: totalAmt,
+          installmentGroupId: groupId,
           createdAt:new Date().toISOString()
         });
       }
-      showToast(`${n} parcelas adicionadas ✓`, 'success');
+      showToast(`Compra parcelada: ${n}x de R$ ${(savedAmount).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} ✓`, 'success');
     } else {
       transactions.push({
         id:uid(), type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
         cardKey, cardLabel,
-        ...installData,
+        installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null,
         createdAt:new Date().toISOString()
       });
       showToast('Transação adicionada ✓', 'success');
@@ -1072,35 +1070,47 @@ function setDefaultFilterMonth() {
   if (filterMonthCards) filterMonthCards.value = m;
 }
 
-// ── CARDS ────────────────────────────────────────
 function renderCards() {
   const month = document.getElementById('filterMonthCards').value;
   const el = document.getElementById('cardsGrid');
   if (!el) return;
-  
+
   const knownCards = [
-    { id: 'inter', name: 'Inter', initials: 'IN' },
+    { id: 'inter',  name: 'Inter',  initials: 'IN' },
     { id: 'nubank', name: 'Nubank', initials: 'NU' },
     { id: 'amazon', name: 'Amazon', initials: 'AZ' },
-    { id: 'outro', name: 'Outro', initials: '++' }
+    { id: 'outro',  name: 'Outro',  initials: '++' }
   ];
 
   const html = knownCards.map(c => {
-    // If it's a credit card transaction but has no cardKey (legacy), fallback to 'outro'
     const isThisCard = (t) => {
       if (t.type !== 'expense') return false;
-      const isCredit = (t.payment === 'credito');
       if (t.cardKey) return t.cardKey === c.id;
-      return (isCredit && c.id === 'outro');
+      return (t.payment === 'credito' && c.id === 'outro');
     };
 
-    const monthlyAmount = transactions.filter(t => 
-      isThisCard(t) && t.date?.startsWith(month)
-    ).reduce((sum, t) => sum + (t.installmentTotal || t.amount), 0);
+    // Gasto no mês = soma das parcelas com vencimento neste mês
+    const monthlyAmount = transactions
+      .filter(t => isThisCard(t) && t.date?.startsWith(month))
+      .reduce((sum, t) => sum + t.amount, 0);
 
-    const totalAmount = transactions.filter(t => 
-      isThisCard(t)
-    ).reduce((sum, t) => sum + (t.installmentTotal || t.amount), 0);
+    // Total acumulado = soma de todas as parcelas já lançadas
+    const totalAmount = transactions
+      .filter(t => isThisCard(t) && t.date?.slice(0,7) <= month)
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    // Parcelas futuras (após o mês selecionado)
+    const futureTxs = transactions.filter(t =>
+      isThisCard(t) && t.installmentGroupId && t.date?.slice(0,7) > month
+    );
+    const pendingTotal = futureTxs.reduce((s, t) => s + t.amount, 0);
+    const pendingCount = futureTxs.length;
+
+    const pendingHtml = pendingTotal > 0 ? `
+          <div class="cc-stat-row">
+            <span class="cc-stat-label">Parcelas Futuras</span>
+            <span class="cc-val-pending" style="color:#f59e0b">R$ ${fmt(pendingTotal)} (${pendingCount}x)</span>
+          </div>` : '';
 
     return `
       <div class="cc-widget cc-${c.id}">
@@ -1113,6 +1123,7 @@ function renderCards() {
             <span class="cc-stat-label">Gasto no Mês</span>
             <span class="cc-val-monthly">R$ ${fmt(monthlyAmount)}</span>
           </div>
+          ${pendingHtml}
           <div class="cc-stat-row">
             <span class="cc-stat-label">Gasto Total Acumulado</span>
             <span class="cc-val-total">R$ ${fmt(totalAmount)}</span>
@@ -1125,7 +1136,6 @@ function renderCards() {
   el.innerHTML = html;
 }
 
-// ── TOAST ─────────────────────────────────────────
 function showToast(msg, type='success') {
   const t = document.getElementById('toast');
   t.textContent = msg;
