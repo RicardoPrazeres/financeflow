@@ -371,7 +371,7 @@ function buildCategorySelects() {
     categories.forEach(c => {
       const opt = document.createElement('option');
       opt.value = c.id;
-      opt.textContent = `${c.emoji} ${c.name}`;
+      opt.textContent = `${c.emoji ? c.emoji + ' ' : ''}${c.name}`;
       el.appendChild(opt);
     });
   });
@@ -393,7 +393,7 @@ function autoCategory() {
   if (detected) {
     const cat = getCat(detected);
     box.style.display = 'block';
-    box.innerHTML = `✨ Sugestão: ${cat.emoji} <strong>${cat.name}</strong> — <u>Aplicar</u>`;
+    box.innerHTML = `✨ Sugestão: ${cat.emoji ? cat.emoji + ' ' : ''}<strong>${cat.name}</strong> — <u>Aplicar</u>`;
     box.onclick = () => {
       document.getElementById('fCategory').value = detected;
       box.style.display = 'none';
@@ -415,7 +415,8 @@ function openModal(id = null) {
     setType(tx.type);
     document.getElementById('fDesc').value     = tx.desc;
     // Show total amount (not installment value) when editing
-    document.getElementById('fAmount').value   = tx.installmentTotal || tx.amount;
+    const amt = tx.installmentTotal || tx.amount;
+    document.getElementById('fAmount').value   = amt ? amt.toString().replace('.', ',') : '';
     document.getElementById('fDate').value     = tx.date;
     document.getElementById('fCategory').value = tx.cat;
     document.getElementById('fPayment').value  = tx.payment;
@@ -458,7 +459,8 @@ function setType(type) {
 
 function saveTransaction() {
   const desc      = document.getElementById('fDesc').value.trim();
-  const totalAmt  = parseFloat(document.getElementById('fAmount').value);
+  const rawAmt    = document.getElementById('fAmount').value.replace(',', '.');
+  const totalAmt  = parseFloat(rawAmt);
   const date      = document.getElementById('fDate').value;
   const cat       = document.getElementById('fCategory').value;
   const payment   = document.getElementById('fPayment').value;
@@ -502,13 +504,42 @@ function saveTransaction() {
     };
     showToast('Transação atualizada ✓', 'success');
   } else {
-    transactions.push({
-      id:uid(), type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
-      cardKey, cardLabel,
-      ...installData,
-      createdAt:new Date().toISOString()
-    });
-    showToast('Transação adicionada ✓', 'success');
+    // Se for parcelado, cria 'n' transações para os meses seguintes
+    if (n > 1) {
+      const [yy, mm, dd] = date.split('-').map(Number);
+      
+      for (let i = 1; i <= n; i++) {
+        let loopDateStr = date;
+        if (i > 1) {
+          const dObj = new Date(yy, mm - 1 + (i - 1), dd);
+          // Ajuste para evitar que dia 31 pule para o mês errado (ex: 31 Jan -> 3 Março)
+          const targetMonth = ((mm - 1 + (i - 1)) % 12 + 12) % 12;
+          if (dObj.getMonth() !== targetMonth) {
+            dObj.setDate(0); 
+          }
+          loopDateStr = dObj.getFullYear() + '-' + String(dObj.getMonth() + 1).padStart(2, '0') + '-' + String(dObj.getDate()).padStart(2, '0');
+        }
+
+        transactions.push({
+          id:uid(), type:currentType, desc, amount:savedAmount, date:loopDateStr, cat, payment, notes, recurring,
+          cardKey, cardLabel,
+          installments: n,
+          installmentPaid: i,
+          installmentValue: savedAmount,
+          installmentTotal: totalAmt,
+          createdAt:new Date().toISOString()
+        });
+      }
+      showToast(`${n} parcelas adicionadas ✓`, 'success');
+    } else {
+      transactions.push({
+        id:uid(), type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
+        cardKey, cardLabel,
+        ...installData,
+        createdAt:new Date().toISOString()
+      });
+      showToast('Transação adicionada ✓', 'success');
+    }
   }
 
   saveData();
@@ -579,8 +610,9 @@ function checkAlerts() {
     const pct = spent / b.limit;
     const cat = getCat(b.cat);
 
-    if (pct >= 1) alerts.push({ text:`${cat.emoji} ${cat.name}: orçamento <strong>EXCEDIDO</strong> (R$ ${fmt(spent)} / ${fmt(b.limit)})`, level:'danger' });
-    else if (pct >= 0.8) alerts.push({ text:`${cat.emoji} ${cat.name}: 80% do orçamento usado (R$ ${fmt(spent)} / ${fmt(b.limit)})`, level:'warning' });
+    const catPrefix = cat.emoji ? cat.emoji + ' ' : '';
+    if (pct >= 1) alerts.push({ text:`${catPrefix}${cat.name}: orçamento <strong>EXCEDIDO</strong> (R$ ${fmt(spent)} / ${fmt(b.limit)})`, level:'danger' });
+    else if (pct >= 0.8) alerts.push({ text:`${catPrefix}${cat.name}: 80% do orçamento usado (R$ ${fmt(spent)} / ${fmt(b.limit)})`, level:'warning' });
   });
 
   const inc = document.getElementById('alertCount');
@@ -705,7 +737,7 @@ function renderCategoryChart() {
     const pct = total > 0 ? (v/total*100).toFixed(0) : 0;
     return `<div class="legend-item">
       <div class="legend-dot" style="background:${cat.color}"></div>
-      <span>${cat.emoji} ${cat.name}</span>
+      <span>${cat.emoji ? cat.emoji + ' ' : ''}${cat.name}</span>
       <span class="legend-pct">${pct}%</span>
     </div>`;
   }).join('');
@@ -729,7 +761,7 @@ function renderBudgetOverview() {
     const color = pct >= 100 ? 'var(--red)' : pct >= 80 ? 'var(--yellow)' : 'var(--green)';
     return `<div class="budget-item">
       <div class="budget-item-header">
-        <span class="budget-item-name">${cat.emoji} ${cat.name}</span>
+        <span class="budget-item-name">${cat.emoji ? cat.emoji + ' ' : ''}${cat.name}</span>
         <span class="budget-item-amount">R$ ${fmt(spent)} / R$ ${fmt(b.limit)}</span>
       </div>
       <div class="budget-bar"><div class="budget-bar-fill" style="width:${pct}%;background:${color}"></div></div>
@@ -824,7 +856,7 @@ function renderBudgets() {
 
     return `<div class="budget-card">
       <div class="budget-card-header">
-        <span class="budget-card-emoji">${cat.emoji}</span>
+        <span class="budget-card-emoji">${cat.emoji || ''}</span>
         <button class="budget-delete" onclick="deleteBudget('${b.id}')">✕</button>
       </div>
       <div class="budget-card-title">${cat.name}</div>
@@ -881,7 +913,7 @@ function renderTopCatChart() {
   chartTopCat = new Chart(ctx, {
     type:'bar',
     data:{
-      labels: sorted.map(([k])=>`${getCat(k).emoji} ${getCat(k).name}`),
+      labels: sorted.map(([k])=>{ const c=getCat(k); return `${c.emoji ? c.emoji + ' ' : ''}${c.name}`; }),
       datasets:[{ data: sorted.map(([,v])=>v), backgroundColor: sorted.map(([k])=>getCat(k).color+'99'), borderColor: sorted.map(([k])=>getCat(k).color), borderWidth:2, borderRadius:6 }]
     },
     options:{ ...chartOpts(), indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{...scaleOpts(),ticks:{...ticksOpts(),callback:v=>`R$${fmtK(v)}`}}, y:{...scaleOpts()} } }
@@ -929,7 +961,7 @@ function renderReportTable() {
       <tbody>${rows.map(([,v])=>{
         const bal=v.income-v.expense;
         return `<tr>
-          <td>${v.emoji} ${v.name}</td>
+          <td>${v.emoji ? v.emoji + ' ' : ''}${v.name}</td>
           <td style="color:var(--green)">R$ ${fmt(v.income)}</td>
           <td style="color:var(--red)">R$ ${fmt(v.expense)}</td>
           <td style="color:${bal>=0?'var(--green)':'var(--red)'}">R$ ${fmt(Math.abs(bal))}</td>
@@ -949,7 +981,7 @@ function renderSettings() {
   } else {
     el.innerHTML = custom.map(c => `<div class="cat-item">
       <div class="cat-dot" style="background:${c.color}"></div>
-      <span class="cat-name">${c.emoji||'📦'} ${c.name}</span>
+      <span class="cat-name">${c.emoji ? c.emoji + ' ' : ''}${c.name}</span>
       <button class="cat-del" onclick="deleteCategory('${c.id}')">✕</button>
     </div>`).join('');
   }
@@ -958,13 +990,16 @@ function renderSettings() {
 function addCustomCategory() {
   const name = document.getElementById('newCatName').value.trim();
   const color = document.getElementById('newCatColor').value;
+  const emojiInput = document.getElementById('newCatEmoji');
+  const emoji = emojiInput ? emojiInput.value.trim() : '';
   if (!name) { showToast('Informe o nome', 'error'); return; }
   const id = 'cat_' + Date.now();
-  categories.push({ id, name, emoji:'📦', color });
+  categories.push({ id, name, emoji: emoji, color });
   saveData();
   buildCategorySelects();
   renderSettings();
   document.getElementById('newCatName').value = '';
+  if (emojiInput) emojiInput.value = '';
   showToast('Categoria adicionada ✓', 'success');
 }
 
