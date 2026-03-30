@@ -547,13 +547,26 @@ function saveTransaction() {
 }
 
 function deleteTransaction(id) {
-  if (!confirm('Excluir esta transação?')) return;
-  transactions = transactions.filter(t => t.id !== id);
+  const tx = transactions.find(t => t.id === id);
+  if (!tx) return;
+
+  const gid = tx.installmentGroupId;
+  const msg = gid ? 'Esta é uma compra parcelada. Excluir TODAS as parcelas desta compra?' : 'Excluir esta transação?';
+
+  if (!confirm(msg)) return;
+
+  if (gid) {
+    transactions = transactions.filter(t => t.installmentGroupId !== gid);
+    showToast('Todas as parcelas foram excluídas ✓', 'warning');
+  } else {
+    transactions = transactions.filter(t => t.id !== id);
+    showToast('Transação excluída', 'warning');
+  }
+
   saveData();
   renderSection(currentSection());
   renderDashboardKPIs();
   checkAlerts();
-  showToast('Transação excluída', 'warning');
 }
 
 // ── MODAL: BUDGET ────────────────────────────────
