@@ -158,6 +158,10 @@ let editingId = null;
 let currentType = 'expense';
 let chartMonthly = null, chartCategory = null, chartAnnual = null, chartTopCat = null, chartTrend = null;
 
+// Bulk select state
+let selectMode = false;
+let selectedIds = new Set();
+
 // ── INIT ─────────────────────────────────────────
 function init() {
   if (auth) {
@@ -178,6 +182,7 @@ function init() {
 }
 
 function finishInit() {
+  document.getElementById('loginOverlay').style.display = 'none';
   buildCategorySelects();
   setDefaultDate();
   setDefaultFilterMonth();
@@ -187,6 +192,10 @@ function finishInit() {
 }
 
 function loginWithGoogle() {
+  if (typeof firebase === 'undefined' || !auth) {
+    alert('❌ O Google Firebase não pôde ser carregado. Verifique sua conexão e tente novamente.');
+    return;
+  }
   const provider = new firebase.auth.GoogleAuthProvider();
   auth.signInWithPopup(provider).catch(err => alert('Erro no login: ' + err.message));
 }
@@ -310,6 +319,15 @@ function navigate(sec) {
   document.getElementById('topbarTitle').textContent = titles[sec] || sec;
 
   closeSidebar();
+  // Reset bulk selection if leaving transactions
+  if (sec !== 'transactions' && selectMode) {
+    selectMode = false;
+    selectedIds.clear();
+    const btn = document.getElementById('btnSelectMode');
+    const bar = document.getElementById('bulkActionBar');
+    if (btn) { btn.classList.remove('select-active'); btn.textContent = '☑ Selecionar'; }
+    if (bar) bar.style.display = 'none';
+  }
   renderSection(sec);
 }
 
@@ -332,13 +350,24 @@ function setupEventListeners() {
   document.querySelectorAll('.nav-item').forEach(el => {
     el.addEventListener('click', e => { e.preventDefault(); navigate(el.dataset.section); });
   });
-  document.getElementById('hamburgerBtn').addEventListener('click', toggleSidebar);
-  document.getElementById('sidebarOverlay').addEventListener('click', closeSidebar);
-  document.getElementById('alertBell').addEventListener('click', toggleAlerts);
-  document.getElementById('dashPeriod').addEventListener('change', renderDashboard);
+
+  const ids = {
+    hamburgerBtn:   () => document.getElementById('hamburgerBtn').addEventListener('click', toggleSidebar),
+    sidebarOverlay: () => document.getElementById('sidebarOverlay').addEventListener('click', closeSidebar),
+    alertBell:      () => document.getElementById('alertBell').addEventListener('click', toggleAlerts),
+    dashPeriod:     () => document.getElementById('dashPeriod').addEventListener('change', renderDashboard),
+  };
+
+  for (const [id, setup] of Object.entries(ids)) {
+    const el = document.getElementById(id);
+    if (el) setup();
+  }
+
   ['filterMonth','filterType','filterCategory','filterSearch'].forEach(id => {
-    document.getElementById(id).addEventListener('input', renderTransactions);
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', renderTransactions);
   });
+  
   const filterMonthCards = document.getElementById('filterMonthCards');
   if (filterMonthCards) {
     filterMonthCards.addEventListener('input', renderCards);
@@ -624,6 +653,123 @@ function deleteTransaction(id) {
   checkAlerts();
 }
 
+// ── BULK SELECT ──────────────────────────────────
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  selectedIds.clear();
+
+  const btn = document.getElementById('btnSelectMode');
+  const bar = document.getElementById('bulkActionBar');
+  const txList = document.getElementById('txList');
+
+  if (selectMode) {
+    btn.classList.add('select-active');
+    btn.textContent = '✕ Cancelar';
+    bar.style.display = 'flex';
+    txList.classList.add('select-mode');
+  } else {
+    btn.classList.remove('select-active');
+    btn.textContent = '☑ Selecionar';
+    bar.style.display = 'none';
+    txList.classList.remove('select-mode');
+  }
+  updateBulkBar();
+  renderTransactions();
+}
+
+function toggleSelectAll(checked) {
+  document.querySelectorAll('.tx-checkbox').forEach(cb => {
+    cb.checked = checked;
+    const id = cb.dataset.id;
+    if (checked) selectedIds.add(id);
+    else selectedIds.delete(id);
+    cb.closest('.tx-item').classList.toggle('tx-selected', checked);
+  });
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const count = selectedIds.size;
+  const countEl = document.getElementById('bulkCount');
+  const deleteBtn = document.getElementById('btnDeleteSelected');
+  const checkAll = document.getElementById('checkAllTx');
+  const total = document.querySelectorAll('.tx-checkbox').length;
+
+  if (countEl) countEl.textContent = count === 0 ? 'Nenhuma selecionada' : `${count} selecionada${count > 1 ? 's' : ''}`;
+  if (deleteBtn) deleteBtn.disabled = count === 0;
+  if (checkAll) {
+    checkAll.indeterminate = count > 0 && count < total;
+    checkAll.checked = total > 0 && count === total;
+  }
+}
+
+function toggleTxSelection(id, el) {
+  if (!selectMode) return;
+  if (selectedIds.has(id)) {
+    selectedIds.delete(id);
+    el.classList.remove('tx-selected');
+    const cb = el.querySelector('.tx-checkbox');
+    if (cb) cb.checked = false;
+  } else {
+    selectedIds.add(id);
+    el.classList.add('tx-selected');
+    const cb = el.querySelector('.tx-checkbox');
+    if (cb) cb.checked = true;
+  }
+  updateBulkBar();
+}
+
+function deleteSelected() {
+  if (selectedIds.size === 0) return;
+
+  // Expand group IDs: clicking any installment of a group selects the whole group
+  const groupIds = new Set();
+  const singleIds = new Set();
+  selectedIds.forEach(id => {
+    const tx = transactions.find(t => t.id === id);
+    if (!tx) return;
+    if (tx.installmentGroupId) groupIds.add(tx.installmentGroupId);
+    else singleIds.add(id);
+  });
+
+  const totalGroups = groupIds.size;
+  const totalSingles = singleIds.size;
+  let msg = '';
+  if (totalGroups > 0 && totalSingles > 0) {
+    msg = `Você selecionou ${totalSingles} transação(ões) avulsas e ${totalGroups} compra(s) parcelada(s). Todas as parcelas das compras parceladas também serão excluídas. Confirmar?`;
+  } else if (totalGroups > 0) {
+    msg = `Excluir ${totalGroups} compra(s) parcelada(s) e todas as suas parcelas?`;
+  } else {
+    msg = `Excluir ${totalSingles} transação(ões) selecionada(s)?`;
+  }
+
+  if (!confirm(msg)) return;
+
+  transactions = transactions.filter(t => {
+    if (t.installmentGroupId && groupIds.has(t.installmentGroupId)) return false;
+    if (singleIds.has(t.id)) return false;
+    return true;
+  });
+
+  const totalDeleted = totalSingles + totalGroups;
+  showToast(`${totalDeleted} item(ns) excluído(s) ✓`, 'warning');
+
+  // Exit select mode
+  selectMode = false;
+  selectedIds.clear();
+  const btn = document.getElementById('btnSelectMode');
+  const bar = document.getElementById('bulkActionBar');
+  const txList = document.getElementById('txList');
+  if (btn) { btn.classList.remove('select-active'); btn.textContent = '☑ Selecionar'; }
+  if (bar) bar.style.display = 'none';
+  if (txList) txList.classList.remove('select-mode');
+
+  saveData();
+  renderSection(currentSection());
+  renderDashboardKPIs();
+  checkAlerts();
+}
+
 // ── MODAL: BUDGET ────────────────────────────────
 function openBudgetModal() {
   document.getElementById('bCategory').value = categories[0]?.id || '';
@@ -872,16 +1018,42 @@ function renderTransactions() {
       <div class="tc-acts"></div>
     </div>`;
     el.innerHTML = header + list.map(t => txItemHTML(t, true)).join('');
+    // Apply select mode class to list
+    if (selectMode) {
+      el.classList.add('select-mode');
+      // Restore previously selected items
+      selectedIds.forEach(id => {
+        const item = el.querySelector(`.tx-item[data-id="${id}"]`);
+        if (item) {
+          item.classList.add('tx-selected');
+          const cb = item.querySelector('.tx-checkbox');
+          if (cb) cb.checked = true;
+        }
+      });
+      updateBulkBar();
+    } else {
+      el.classList.remove('select-mode');
+    }
   }
 }
 
 function txItemHTML(t, showActions=false) {
   const cat = getCat(t.cat);
   const dateStr = t.date ? new Date(t.date+'T00:00:00').toLocaleDateString('pt-BR') : '';
+
+  // In select mode: clicking the row toggles selection; otherwise opens modal
+  const rowClick = selectMode
+    ? `onclick="toggleTxSelection('${t.id}', this)"`
+    : `onclick="openModal('${t.id}')"`;
+
   const actions = showActions ? `<div class="tx-actions">
     <button class="tx-btn" onclick="event.stopPropagation();openModal('${t.id}')" title="Editar">✏️</button>
     <button class="tx-btn" onclick="event.stopPropagation();deleteTransaction('${t.id}')" title="Excluir">🗑</button>
   </div>` : '';
+
+  const checkbox = showActions
+    ? `<input type="checkbox" class="tx-checkbox" data-id="${t.id}" onclick="event.stopPropagation();toggleTxSelection('${t.id}', this.closest('.tx-item'))">`
+    : '';
 
   // Installment info
   let installBadge = '';
@@ -900,7 +1072,8 @@ function txItemHTML(t, showActions=false) {
   // Card badge
   const cardBadge = t.cardLabel ? `<span class="tx-card-badge tx-card-${t.cardKey || 'outro'}">${t.cardLabel}</span>` : '';
 
-  return `<div class="tx-item ${showActions ? 'tx-item-wide' : ''}" onclick="openModal('${t.id}')">
+  return `<div class="tx-item ${showActions ? 'tx-item-wide' : ''} ${selectedIds.has(t.id) ? 'tx-selected' : ''}" data-id="${t.id}" ${rowClick}>
+    ${checkbox}
     <div class="tx-icon" style="background:${cat.color}22">${cat.emoji}</div>
     <div class="tx-info mobile-col">
       <div class="tx-desc">${esc(t.desc)}${t.recurring?' 🔄':''}</div>
@@ -1105,17 +1278,155 @@ function clearAllData() {
   }
 }
 
-// ── EXPORT CSV ───────────────────────────────────
+// ── EXPORT / IMPORT CSV ──────────────────────────
+function triggerImportCSV() {
+  const input = document.getElementById('csvFileInput');
+  if (input) input.click();
+}
+
+function handleCSVImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const text = e.target.result;
+    parseCSVAndImport(text);
+  };
+  reader.readAsText(file);
+  event.target.value = ''; // Reset input
+}
+
+function parseCSVAndImport(csvText) {
+  // Suporta \r\n (Windows) e \n (Unix)
+  const lines = csvText.trim().split(/\r?\n/);
+  if (lines.length < 2) {
+    showToast('Arquivo CSV vazio ou inválido', 'error');
+    return;
+  }
+
+  // Detectar delimitador
+  const firstLine = lines[0];
+  const delimiter = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
+
+  // Divide linha respeitando aspas
+  function splitRow(line, delim) {
+    const result = [];
+    let cur = '', inQ = false;
+    for (const c of line) {
+      if (c === '"') { inQ = !inQ; }
+      else if (c === delim && !inQ) { result.push(cur); cur = ''; }
+      else { cur += c; }
+    }
+    result.push(cur);
+    return result.map(v => v.trim().replace(/^"|"$/g, '').trim());
+  }
+
+  // Mapear colunas pelo cabeçalho
+  const headerRow = splitRow(firstLine, delimiter).map(h => h.toLowerCase());
+  const col = (terms) => headerRow.findIndex(h => terms.some(t => h.includes(t)));
+  const idx = {
+    date:    col(['data']),
+    type:    col(['tipo']),
+    desc:    col(['desc']),
+    cat:     col(['categ']),
+    amount:  col(['valor']),
+    payment: col(['pagam']),
+    card:    col(['cartão','cartao','card']),
+    notes:   col(['nota','obs']),
+  };
+  // Fallback para posição fixa (formato antigo sem coluna Cartão)
+  if (idx.date    < 0) idx.date    = 0;
+  if (idx.type    < 0) idx.type    = 1;
+  if (idx.desc    < 0) idx.desc    = 2;
+  if (idx.cat     < 0) idx.cat     = 3;
+  if (idx.amount  < 0) idx.amount  = 4;
+  if (idx.payment < 0) idx.payment = 5;
+  if (idx.notes   < 0) idx.notes   = 6;
+
+  const cardMap = { inter:'Inter', nubank:'Nubank', amazon:'Amazon', outro:'Outro' };
+
+  let importedCount = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const row = splitRow(line, delimiter);
+
+    const date     = (row[idx.date]    || '').trim();
+    const typeStr  = (row[idx.type]    || '').trim();
+    const desc     = (row[idx.desc]    || '').trim();
+    const catName  = (row[idx.cat]     || '').trim();
+    const amountRaw= (row[idx.amount]  || '').trim();
+    const payment  = (row[idx.payment] || '').trim();
+    const cardRaw  = idx.card >= 0 ? (row[idx.card] || '').trim().toLowerCase() : '';
+    const notes    = idx.notes >= 0 ? (row[idx.notes] || '').trim() : '';
+
+    // Valida data YYYY-MM-DD
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (!desc) continue;
+
+    const type   = typeStr.toLowerCase().includes('entrada') ? 'income' : 'expense';
+    const amount = parseFloat(amountRaw.replace(',', '.')) || 0;
+    if (amount <= 0) continue;
+
+    const foundCat = categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
+    const catId    = foundCat ? foundCat.id : 'other';
+
+    // Mapear cartão
+    let cardKey = null, cardLabel = null;
+    if (cardRaw) {
+      const matched = Object.keys(cardMap).find(k => cardRaw.includes(k));
+      if (matched) {
+        cardKey   = matched;
+        cardLabel = cardMap[matched];
+      } else if (cardRaw.length > 0) {
+        cardKey   = 'outro';
+        cardLabel = row[idx.card].trim() || 'Outro';
+      }
+    }
+
+    transactions.push({
+      id: uid(), type, desc, amount, date, cat: catId,
+      payment: payment || 'Outros',
+      notes, recurring: false,
+      cardKey, cardLabel,
+      installments: null, installmentPaid: null,
+      installmentValue: null, installmentTotal: null,
+      createdAt: new Date().toISOString()
+    });
+    importedCount++;
+  }
+
+  if (importedCount > 0) {
+    saveData();
+    renderSection(currentSection());
+    if (currentSection() !== 'dashboard') renderDashboardKPIs();
+    checkAlerts();
+    showToast(`${importedCount} transações importadas! ✓`, 'success');
+  } else {
+    showToast('Nenhuma transação válida encontrada. Verifique o formato do arquivo.', 'warning');
+  }
+}
+
 function exportCSV() {
-  const header = 'Data,Tipo,Descrição,Categoria,Valor,Pagamento,Notas\n';
+  // Inclui coluna Cartão para que reimportação reconheça o cartão correto
+  const header = 'Data,Tipo,Descrição,Categoria,Valor,Pagamento,Cartão,Notas\n';
   const rows = transactions.map(t => [
-    t.date, t.type==='income'?'Entrada':'Saída', `"${t.desc}"`, getCat(t.cat).name, t.amount.toFixed(2), t.payment, `"${t.notes||''}"`
+    t.date,
+    t.type === 'income' ? 'Entrada' : 'Saída',
+    `"${(t.desc  || '').replace(/"/g, '""')}"`,
+    getCat(t.cat).name,
+    t.amount.toFixed(2),
+    t.payment || '',
+    t.cardLabel || '',
+    `"${(t.notes || '').replace(/"/g, '""')}"`
   ].join(',')).join('\n');
 
-  const blob = new Blob(['\ufeff'+header+rows], { type:'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href=url; a.download=`financeflow_${new Date().toISOString().slice(0,10)}.csv`;
+  const blob = new Blob(['\ufeff' + header + rows], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `financeflow_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
   showToast('Exportado com sucesso ✓', 'success');
@@ -1137,17 +1448,14 @@ function uid() { return Math.random().toString(36).slice(2) + Date.now().toStrin
 function fmt(n) { return Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtK(v) { return v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(0); }
 function esc(s) { const d=document.createElement('div');d.textContent=s;return d.innerHTML; }
-function currentSection() {
-  const s = document.querySelector('.section.active');
-  if (!s) return 'dashboard';
-  return s.id.replace('sec-','');
-}
+
 function setDefaultDate() {
   document.getElementById('fDate').value = new Date().toISOString().slice(0,10);
 }
 function setDefaultFilterMonth() {
   const m = new Date().toISOString().slice(0,7);
-  document.getElementById('filterMonth').value = m;
+  const filterMonth = document.getElementById('filterMonth');
+  if (filterMonth) filterMonth.value = m;
   const filterMonthCards = document.getElementById('filterMonthCards');
   if (filterMonthCards) filterMonthCards.value = m;
 }
