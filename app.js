@@ -1298,18 +1298,14 @@ function handleCSVImport(event) {
 }
 
 function parseCSVAndImport(csvText) {
-  // Suporta \r\n (Windows) e \n (Unix)
   const lines = csvText.trim().split(/\r?\n/);
-  if (lines.length < 2) {
-    showToast('Arquivo CSV vazio ou inválido', 'error');
-    return;
-  }
+  if (lines.length < 2) { showToast('Arquivo CSV vazio ou inválido', 'error'); return; }
 
-  // Detectar delimitador
+  // ── Detectar delimitador ──
   const firstLine = lines[0];
   const delimiter = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
 
-  // Divide linha respeitando aspas
+  // ── Divide linha respeitando aspas ──
   function splitRow(line, delim) {
     const result = [];
     let cur = '', inQ = false;
@@ -1322,79 +1318,147 @@ function parseCSVAndImport(csvText) {
     return result.map(v => v.trim().replace(/^"|"$/g, '').trim());
   }
 
-  // Mapear colunas pelo cabeçalho
+  // ── Mapear colunas pelo cabeçalho ──
   const headerRow = splitRow(firstLine, delimiter).map(h => h.toLowerCase());
   const col = (terms) => headerRow.findIndex(h => terms.some(t => h.includes(t)));
   const idx = {
     date:    col(['data']),
-    type:    col(['tipo']),
-    desc:    col(['desc']),
-    cat:     col(['categ']),
+    desc:    col(['lan\u00e7amento','lancamento','descri']),
+    catCol:  col(['categ']),
+    tipo:    col(['tipo']),
     amount:  col(['valor']),
     payment: col(['pagam']),
-    card:    col(['cartão','cartao','card']),
+    card:    col(['cart\u00e3o','cartao','card']),
     notes:   col(['nota','obs']),
   };
-  // Fallback para posição fixa (formato antigo sem coluna Cartão)
-  if (idx.date    < 0) idx.date    = 0;
-  if (idx.type    < 0) idx.type    = 1;
-  if (idx.desc    < 0) idx.desc    = 2;
-  if (idx.cat     < 0) idx.cat     = 3;
-  if (idx.amount  < 0) idx.amount  = 4;
-  if (idx.payment < 0) idx.payment = 5;
-  if (idx.notes   < 0) idx.notes   = 6;
+  if (idx.date   < 0) idx.date   = 0;
+  if (idx.desc   < 0) idx.desc   = 1;
+  if (idx.catCol < 0) idx.catCol = 2;
+  if (idx.tipo   < 0) idx.tipo   = 3;
+  if (idx.amount < 0) idx.amount = 4;
 
-  const cardMap = { inter:'Inter', nubank:'Nubank', amazon:'Amazon', outro:'Outro' };
+  // ── Mapeamento categorias do banco → app ──
+  const BANK_CAT_MAP = {
+    'supermercado':'food','restaurantes':'food','alimentacao':'food','alimenta\u00e7ao':'food',
+    'padaria':'food','transporte':'transport','combustivel':'transport','combust\u00edvel':'transport',
+    'estacionamento':'transport','saude':'health','sa\u00fade':'health','drogaria':'health',
+    'farmacia':'health','farm\u00e1cia':'health','hospital':'health','ensino':'education',
+    'educacao':'education','educa\u00e7\u00e3o':'education','entretenimento':'leisure',
+    'esportes':'leisure','lazer':'leisure','vestuario':'clothing','vestu\u00e1rio':'clothing',
+    'construcao':'housing','constru\u00e7\u00e3o':'housing','moradia':'housing',
+    'servicos':'bills','servi\u00e7os':'bills','compras':'other','outros':'other',
+  };
 
-  let importedCount = 0;
+  // ── Converter data DD/MM/YYYY ou YYYY-MM-DD → YYYY-MM-DD ──
+  function parseDate(str) {
+    str = (str || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const m = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return null;
+  }
+
+  // ── Limpar nome do lançamento ──
+  function cleanDesc(raw) {
+    return raw
+      .replace(/\s{2,}[A-Z][A-Za-z\s]+(BRA|SC|SP|RJ|MG|RS|PR|BA|CE|GO|PE|AM|PA|MT|MS|ES|AL|PB|RN|PI|MA|TO|SE|RO|AC|AP|RR|DF)\s*$/i, '')
+      .replace(/\s{2,}/g, ' ').trim();
+  }
+
+  // ── Adicionar N meses a uma data YYYY-MM-DD ──
+  function addMonths(dateStr, n) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1 + n, d);
+    const targetMon = ((m - 1 + n) % 12 + 12) % 12;
+    if (dt.getMonth() !== targetMon) dt.setDate(0);
+    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+  }
+
+  let importedCount = 0, skippedCount = 0;
+
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
     const row = splitRow(line, delimiter);
 
-    const date     = (row[idx.date]    || '').trim();
-    const typeStr  = (row[idx.type]    || '').trim();
-    const desc     = (row[idx.desc]    || '').trim();
-    const catName  = (row[idx.cat]     || '').trim();
-    const amountRaw= (row[idx.amount]  || '').trim();
-    const payment  = (row[idx.payment] || '').trim();
-    const cardRaw  = idx.card >= 0 ? (row[idx.card] || '').trim().toLowerCase() : '';
-    const notes    = idx.notes >= 0 ? (row[idx.notes] || '').trim() : '';
+    const dateRaw = (row[idx.date]   || '').trim();
+    const descRaw = (row[idx.desc]   || '').trim();
+    const catRaw  = (row[idx.catCol] || '').trim().toLowerCase();
+    const tipoRaw = (row[idx.tipo]   || '').trim();
+    const amtRaw  = (row[idx.amount] || '').trim();
 
-    // Valida data YYYY-MM-DD
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-    if (!desc) continue;
+    const date = parseDate(dateRaw);
+    if (!date) { skippedCount++; continue; }
 
-    const type   = typeStr.toLowerCase().includes('entrada') ? 'income' : 'expense';
-    const amount = parseFloat(amountRaw.replace(',', '.')) || 0;
-    if (amount <= 0) continue;
+    const desc = cleanDesc(descRaw);
+    if (!desc) { skippedCount++; continue; }
 
-    const foundCat = categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
-    const catId    = foundCat ? foundCat.id : 'other';
+    // Valor: remover "R$", pontos de milhar, trocar vírgula por ponto
+    const amtClean = amtRaw.replace(/R\$\s*/g,'').replace(/\./g,'').replace(',','.').trim();
+    const amount   = parseFloat(amtClean);
+    if (isNaN(amount)) { skippedCount++; continue; }
 
-    // Mapear cartão
-    let cardKey = null, cardLabel = null;
-    if (cardRaw) {
-      const matched = Object.keys(cardMap).find(k => cardRaw.includes(k));
-      if (matched) {
-        cardKey   = matched;
-        cardLabel = cardMap[matched];
-      } else if (cardRaw.length > 0) {
-        cardKey   = 'outro';
-        cardLabel = row[idx.card].trim() || 'Outro';
+    // Pagamento de fatura (negativo + contém pagto/debito) → ignorar
+    if (amount < 0 && /pagto|pagamento|debito automat/i.test(desc)) { skippedCount++; continue; }
+
+    const type      = amount < 0 ? 'income' : 'expense';
+    const absAmount = Math.abs(amount);
+    if (absAmount <= 0) { skippedCount++; continue; }
+
+    // Categoria: banco → app, senão detecta pela descrição, senão 'other'
+    const catId = BANK_CAT_MAP[catRaw] || detectCategory(desc) || 'other';
+
+    // ── Parcelado: "Parcela X/Y" ──
+    const parcelaMatch = tipoRaw.match(/parcela\s+(\d+)\/(\d+)/i);
+
+    if (parcelaMatch) {
+      const paidNum  = parseInt(parcelaMatch[1]);
+      const totalNum = parseInt(parcelaMatch[2]);
+      const installValue = +absAmount.toFixed(2);
+      const installTotal = +(installValue * totalNum).toFixed(2);
+
+      // Data da 1ª parcela (recua paidNum-1 meses)
+      const firstDate = addMonths(date, -(paidNum - 1));
+
+      // Deduplicação por chave única
+      const dupKey = `${desc}|${installTotal}|${firstDate}|${totalNum}`;
+      if (transactions.some(t => t._importKey === dupKey)) { skippedCount++; continue; }
+
+      const groupId = uid();
+      for (let p = 1; p <= totalNum; p++) {
+        const pDate = addMonths(firstDate, p - 1);
+        transactions.push({
+          id: uid(), type, desc, amount: installValue, date: pDate,
+          cat: catId, payment: 'credito',
+          notes: 'Importado CSV (Inter)',
+          recurring: false, cardKey: 'inter', cardLabel: 'Inter',
+          installments: totalNum, installmentPaid: p,
+          installmentValue: installValue, installmentTotal: installTotal,
+          installmentGroupId: groupId, _importKey: dupKey,
+          createdAt: new Date().toISOString()
+        });
       }
-    }
+      importedCount++;
 
-    transactions.push({
-      id: uid(), type, desc, amount, date, cat: catId,
-      payment: payment || 'Outros',
-      notes, recurring: false,
-      cardKey, cardLabel,
-      installments: null, installmentPaid: null,
-      installmentValue: null, installmentTotal: null,
-      createdAt: new Date().toISOString()
-    });
-    importedCount++;
+    } else {
+      // Compra à vista — deduplicação simples
+      if (transactions.some(t => t.desc === desc && t.date === date && Math.abs(t.amount - absAmount) < 0.01)) {
+        skippedCount++; continue;
+      }
+      transactions.push({
+        id: uid(), type, desc, amount: absAmount, date,
+        cat: catId,
+        payment: type === 'income' ? 'Estorno' : 'credito',
+        notes: 'Importado CSV (Inter)',
+        recurring: false,
+        cardKey:   type === 'income' ? null : 'inter',
+        cardLabel: type === 'income' ? null : 'Inter',
+        installments: null, installmentPaid: null,
+        installmentValue: null, installmentTotal: null,
+        createdAt: new Date().toISOString()
+      });
+      importedCount++;
+    }
   }
 
   if (importedCount > 0) {
@@ -1402,7 +1466,8 @@ function parseCSVAndImport(csvText) {
     renderSection(currentSection());
     if (currentSection() !== 'dashboard') renderDashboardKPIs();
     checkAlerts();
-    showToast(`${importedCount} transações importadas! ✓`, 'success');
+    const extra = skippedCount > 0 ? ` (${skippedCount} ignoradas)` : '';
+    showToast(`${importedCount} transações importadas!${extra} ✓`, 'success');
   } else {
     showToast('Nenhuma transação válida encontrada. Verifique o formato do arquivo.', 'warning');
   }
