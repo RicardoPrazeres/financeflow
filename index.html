@@ -371,7 +371,7 @@
         <div class="section-header">
           <h1 class="section-title">Dashboard</h1>
           <div class="period-selector">
-            <input type="month" id="dashPeriod" class="filter-input">
+            <input type="month" id="dashPeriod" class="filter-input" onclick="this.showPicker()">
           </div>
         </div>
 
@@ -444,7 +444,7 @@
 
         <!-- FILTERS -->
         <div class="filters-bar">
-          <input type="month" id="filterMonth" class="filter-input">
+          <input type="month" id="filterMonth" class="filter-input" onclick="this.showPicker()">
           <select id="filterType" class="filter-input">
             <option value="">Todos os tipos</option>
             <option value="income">Entradas</option>
@@ -490,7 +490,7 @@
         </div>
 
         <div class="filters-bar" style="justify-content: flex-start; margin-bottom: 20px;">
-          <input type="month" id="filterMonthCards" class="filter-input">
+          <input type="month" id="filterMonthCards" class="filter-input" onclick="this.showPicker()">
         </div>
 
         <div id="cardsGrid" class="cards-grid"></div>
