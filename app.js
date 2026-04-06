@@ -355,7 +355,7 @@ function setupEventListeners() {
     hamburgerBtn:   () => document.getElementById('hamburgerBtn').addEventListener('click', toggleSidebar),
     sidebarOverlay: () => document.getElementById('sidebarOverlay').addEventListener('click', closeSidebar),
     alertBell:      () => document.getElementById('alertBell').addEventListener('click', toggleAlerts),
-    dashPeriod:     () => document.getElementById('dashPeriod').addEventListener('change', renderDashboard),
+    dashPeriod:     () => document.getElementById('dashPeriod').addEventListener('input', renderDashboard),
   };
 
   for (const [id, setup] of Object.entries(ids)) {
@@ -975,9 +975,10 @@ function renderBudgetOverview() {
 }
 
 function renderRecentTransactions() {
-  const recent = [...transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
+  const periodTxs = getPeriodTransactions();
+  const recent = [...periodTxs].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
   const el = document.getElementById('recentList');
-  el.innerHTML = recent.length ? recent.map(t => txItemHTML(t)).join('') : '<p style="padding:20px;color:var(--text2);font-size:13px">Nenhuma transação ainda.</p>';
+  el.innerHTML = recent.length ? recent.map(t => txItemHTML(t)).join('') : '<p style="padding:20px;color:var(--text2);font-size:13px">Nenhuma transação para este período.</p>';
 }
 
 // ── TRANSACTIONS ─────────────────────────────────
