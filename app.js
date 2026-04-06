@@ -1298,28 +1298,66 @@ function handleCSVImport(event) {
 }
 
 function parseCSVAndImport(csvText) {
-  const lines = csvText.trim().split(/\r?\n/);
-  if (lines.length < 2) { showToast('Arquivo CSV vazio ou inválido', 'error'); return; }
+  if (!csvText || csvText.trim() === '') {
+    showToast('Arquivo CSV vazio ou inválido', 'error');
+    return;
+  }
 
-  // ── Detectar delimitador ──
-  const firstLine = lines[0];
+  // ── 1. Parsear CSV corretamente (suporta quebras de linha dentro de aspas) ──
+  const firstLineIdx = csvText.indexOf('\n');
+  const firstLine = firstLineIdx !== -1 ? csvText.substring(0, firstLineIdx) : csvText;
   const delimiter = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
 
-  // ── Divide linha respeitando aspas ──
-  function splitRow(line, delim) {
-    const result = [];
-    let cur = '', inQ = false;
-    for (const c of line) {
-      if (c === '"') { inQ = !inQ; }
-      else if (c === delim && !inQ) { result.push(cur); cur = ''; }
-      else { cur += c; }
+  function parseCSV(text, delim) {
+    const rows = [];
+    let curRow = [];
+    let curCell = '';
+    let inQ = false;
+    
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        const next = text[i+1];
+        
+        if (c === '"') {
+            if (inQ && next === '"') {
+                curCell += '"';
+                i++; // pula aspa escapada
+            } else {
+                inQ = !inQ;
+            }
+        } else if (c === delim && !inQ) {
+            curRow.push(curCell);
+            curCell = '';
+        } else if ((c === '\n' || c === '\r') && !inQ) {
+            if (c === '\r' && next === '\n') {
+                i++;
+            }
+            curRow.push(curCell);
+            if (curRow.length > 1 || curRow[0] !== '') {
+               rows.push(curRow.map(v => v.trim()));
+            }
+            curRow = [];
+            curCell = '';
+        } else {
+            curCell += c;
+        }
     }
-    result.push(cur);
-    return result.map(v => v.trim().replace(/^"|"$/g, '').trim());
+    // Adiciona o restinho
+    if (curCell !== '' || curRow.length > 0) {
+        curRow.push(curCell);
+        rows.push(curRow.map(v => v.trim()));
+    }
+    return rows;
+  }
+
+  const rows = parseCSV(csvText.trim(), delimiter);
+  if (rows.length < 2) {
+    showToast('Arquivo CSV vazio ou sem dados', 'error');
+    return;
   }
 
   // ── Mapear colunas pelo cabeçalho ──
-  const headerRow = splitRow(firstLine, delimiter).map(h => h.toLowerCase());
+  const headerRow = rows[0].map(h => h.toLowerCase());
   const col = (terms) => headerRow.findIndex(h => terms.some(t => h.includes(t)));
   const idx = {
     date:    col(['data']),
@@ -1337,7 +1375,7 @@ function parseCSVAndImport(csvText) {
   if (idx.tipo   < 0) idx.tipo   = 3;
   if (idx.amount < 0) idx.amount = 4;
 
-  // ── Mapeamento categorias do banco → app ──
+  // ── Mapeamento categorias banco → app ──
   const BANK_CAT_MAP = {
     'supermercado':'food','restaurantes':'food','alimentacao':'food','alimenta\u00e7ao':'food',
     'padaria':'food','transporte':'transport','combustivel':'transport','combust\u00edvel':'transport',
@@ -1349,7 +1387,6 @@ function parseCSVAndImport(csvText) {
     'servicos':'bills','servi\u00e7os':'bills','compras':'other','outros':'other',
   };
 
-  // ── Converter data DD/MM/YYYY ou YYYY-MM-DD → YYYY-MM-DD ──
   function parseDate(str) {
     str = (str || '').trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
@@ -1358,14 +1395,13 @@ function parseCSVAndImport(csvText) {
     return null;
   }
 
-  // ── Limpar nome do lançamento ──
   function cleanDesc(raw) {
     return raw
+      .replace(/(\r\n|\n|\r)/gm, ' ')
       .replace(/\s{2,}[A-Z][A-Za-z\s]+(BRA|SC|SP|RJ|MG|RS|PR|BA|CE|GO|PE|AM|PA|MT|MS|ES|AL|PB|RN|PI|MA|TO|SE|RO|AC|AP|RR|DF)\s*$/i, '')
       .replace(/\s{2,}/g, ' ').trim();
   }
 
-  // ── Adicionar N meses a uma data YYYY-MM-DD ──
   function addMonths(dateStr, n) {
     const [y, m, d] = dateStr.split('-').map(Number);
     const dt = new Date(y, m - 1 + n, d);
@@ -1376,10 +1412,9 @@ function parseCSVAndImport(csvText) {
 
   let importedCount = 0, skippedCount = 0;
 
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const row = splitRow(line, delimiter);
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length < 2) continue;
 
     const dateRaw = (row[idx.date]   || '').trim();
     const descRaw = (row[idx.desc]   || '').trim();
@@ -1393,22 +1428,19 @@ function parseCSVAndImport(csvText) {
     const desc = cleanDesc(descRaw);
     if (!desc) { skippedCount++; continue; }
 
-    // Valor: remover "R$", pontos de milhar, trocar vírgula por ponto
-    const amtClean = amtRaw.replace(/R\$\s*/g,'').replace(/\./g,'').replace(',','.').trim();
-    const amount   = parseFloat(amtClean);
+    // Limpeza de valor blindada
+    const amtClean = amtRaw.replace(/R\$\s*/gi, '').replace(/[\u00A0\s]/g, '').replace(/\./g, '').replace(',', '.').trim();
+    const amount = parseFloat(amtClean);
     if (isNaN(amount)) { skippedCount++; continue; }
 
-    // Pagamento de fatura (negativo + contém pagto/debito) → ignorar
     if (amount < 0 && /pagto|pagamento|debito automat/i.test(desc)) { skippedCount++; continue; }
 
-    const type      = amount < 0 ? 'income' : 'expense';
+    const type = amount < 0 ? 'income' : 'expense';
     const absAmount = Math.abs(amount);
     if (absAmount <= 0) { skippedCount++; continue; }
 
-    // Categoria: banco → app, senão detecta pela descrição, senão 'other'
     const catId = BANK_CAT_MAP[catRaw] || detectCategory(desc) || 'other';
 
-    // ── Parcelado: "Parcela X/Y" ──
     const parcelaMatch = tipoRaw.match(/parcela\s+(\d+)\/(\d+)/i);
 
     if (parcelaMatch) {
@@ -1416,21 +1448,17 @@ function parseCSVAndImport(csvText) {
       const totalNum = parseInt(parcelaMatch[2]);
       const installValue = +absAmount.toFixed(2);
       const installTotal = +(installValue * totalNum).toFixed(2);
-
-      // Data da 1ª parcela (recua paidNum-1 meses)
       const firstDate = addMonths(date, -(paidNum - 1));
 
-      // Deduplicação por chave única
       const dupKey = `${desc}|${installTotal}|${firstDate}|${totalNum}`;
       if (transactions.some(t => t._importKey === dupKey)) { skippedCount++; continue; }
 
       const groupId = uid();
       for (let p = 1; p <= totalNum; p++) {
-        const pDate = addMonths(firstDate, p - 1);
         transactions.push({
-          id: uid(), type, desc, amount: installValue, date: pDate,
-          cat: catId, payment: 'credito',
-          notes: 'Importado CSV (Inter)',
+          id: uid(), type, desc, amount: installValue,
+          date: addMonths(firstDate, p - 1),
+          cat: catId, payment: 'credito', notes: 'Importado CSV (Inter)',
           recurring: false, cardKey: 'inter', cardLabel: 'Inter',
           installments: totalNum, installmentPaid: p,
           installmentValue: installValue, installmentTotal: installTotal,
@@ -1439,19 +1467,15 @@ function parseCSVAndImport(csvText) {
         });
       }
       importedCount++;
-
     } else {
-      // Compra à vista — deduplicação simples
       if (transactions.some(t => t.desc === desc && t.date === date && Math.abs(t.amount - absAmount) < 0.01)) {
         skippedCount++; continue;
       }
       transactions.push({
         id: uid(), type, desc, amount: absAmount, date,
-        cat: catId,
-        payment: type === 'income' ? 'Estorno' : 'credito',
-        notes: 'Importado CSV (Inter)',
-        recurring: false,
-        cardKey:   type === 'income' ? null : 'inter',
+        cat: catId, payment: type === 'income' ? 'Estorno' : 'credito',
+        notes: 'Importado CSV (Inter)', recurring: false,
+        cardKey: type === 'income' ? null : 'inter',
         cardLabel: type === 'income' ? null : 'Inter',
         installments: null, installmentPaid: null,
         installmentValue: null, installmentTotal: null,
@@ -1466,10 +1490,10 @@ function parseCSVAndImport(csvText) {
     renderSection(currentSection());
     if (currentSection() !== 'dashboard') renderDashboardKPIs();
     checkAlerts();
-    const extra = skippedCount > 0 ? ` (${skippedCount} ignoradas)` : '';
-    showToast(`${importedCount} transações importadas!${extra} ✓`, 'success');
+    const extra = skippedCount > 0 ? ` (${skippedCount} puladas ou duplicadas)` : '';
+    showToast(`${importedCount} lançamentos importados!${extra} ✓`, 'success');
   } else {
-    showToast('Nenhuma transação válida encontrada. Verifique o formato do arquivo.', 'warning');
+    showToast('Nenhuma transação nova importada.', 'warning');
   }
 }
 
