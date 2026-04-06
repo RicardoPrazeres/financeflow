@@ -860,16 +860,8 @@ function renderDashboard() {
 
 function getPeriodTransactions() {
   const period = document.getElementById('dashPeriod').value;
-  const now = new Date();
-  return transactions.filter(t => {
-    const d = new Date(t.date + 'T00:00:00');
-    if (period === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    if (period === 'last3') {
-      const cutoff = new Date(now.getFullYear(), now.getMonth()-2, 1);
-      return d >= cutoff;
-    }
-    return d.getFullYear() === now.getFullYear();
-  });
+  if (!period) return transactions;
+  return transactions.filter(t => t.date?.startsWith(period));
 }
 
 function renderDashboardKPIs() {
@@ -894,12 +886,14 @@ function renderDashboardKPIs() {
 }
 
 function renderMonthlyChart() {
-  const now = new Date();
+  const period = document.getElementById('dashPeriod').value || new Date().toISOString().slice(0,7);
+  const [py, pm] = period.split('-').map(Number);
+  const selectedDate = new Date(py, pm - 1, 1);
   const months = [];
   const incomes = [], expenses = [];
 
   for (let i=5; i>=0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    const d = new Date(selectedDate.getFullYear(), selectedDate.getMonth()-i, 1);
     const m = d.toISOString().slice(0,7);
     months.push(d.toLocaleString('pt-BR', { month:'short' }));
     const mTxs = transactions.filter(t => t.date?.startsWith(m));
@@ -923,7 +917,7 @@ function renderMonthlyChart() {
 }
 
 function renderCategoryChart() {
-  const month = new Date().toISOString().slice(0,7);
+  const month = document.getElementById('dashPeriod').value || new Date().toISOString().slice(0,7);
   const exp = transactions.filter(t => t.type==='expense' && t.date?.startsWith(month));
   const catTotals = {};
   exp.forEach(t => { catTotals[t.cat] = (catTotals[t.cat]||0) + t.amount; });
@@ -955,7 +949,7 @@ function renderCategoryChart() {
 }
 
 function renderBudgetOverview() {
-  const month = new Date().toISOString().slice(0,7);
+  const month = document.getElementById('dashPeriod').value || new Date().toISOString().slice(0,7);
   const el = document.getElementById('budgetBars');
   const active = budgets.filter(b => b.month === month);
 
@@ -1547,6 +1541,8 @@ function setDefaultFilterMonth() {
   if (filterMonth) filterMonth.value = m;
   const filterMonthCards = document.getElementById('filterMonthCards');
   if (filterMonthCards) filterMonthCards.value = m;
+  const dashPeriod = document.getElementById('dashPeriod');
+  if (dashPeriod) dashPeriod.value = m;
 }
 
 function renderCards() {
