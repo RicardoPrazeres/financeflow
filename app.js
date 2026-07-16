@@ -54,8 +54,15 @@ if (typeof firebase !== 'undefined') {
     .catch(err => console.error("Auth persistence setup erro: ", err));
 }
 
-// ── GEMINI AI (RECEIPT SCANNING) ─────────────────
-const GEMINI_API_KEY = 'AIzaSyBMrHsPG86oTgfsoXsVOC3bZ7pEIkk9fo0';
+let GEMINI_API_KEY = localStorage.getItem('ff_gemini_api_key') || 'AIzaSyBMrHsPG86oTgfsoXsVOC3bZ7pEIkk9fo0';
+
+const DEFAULT_CARDS = [
+  { id: 'inter',  name: 'Inter',  initials: 'IN', color: 'linear-gradient(135deg,#f97316,#ea580c)', limit: 5000 },
+  { id: 'nubank', name: 'Nubank', initials: 'NU', color: 'linear-gradient(135deg,#8b5cf6,#6d28d9)', limit: 8000 },
+  { id: 'amazon', name: 'Amazon', initials: 'AZ', color: 'linear-gradient(135deg,#f59e0b,#d97706)', limit: 4000 },
+  { id: 'outro',  name: 'Outro',  initials: '++', color: 'linear-gradient(135deg,#64748b,#475569)', limit: 2000 }
+];
+let customCards = [];
 
 function triggerScanReceipt() {
   document.getElementById('receiptFileInput').click();
@@ -64,6 +71,11 @@ function triggerScanReceipt() {
 async function handleReceiptImage(event) {
   const file = event.target.files[0];
   if (!file) return;
+
+  const previewImg = document.getElementById('scanPreview');
+  if (previewImg) {
+    previewImg.src = URL.createObjectURL(file);
+  }
 
   const overlay = document.getElementById('scanOverlay');
   overlay.style.display = 'flex';
@@ -138,15 +150,38 @@ function prefillTransactionFromReceipt(data) {
   openModal();
   setTimeout(() => {
     setType(data.type || 'expense');
-    document.getElementById('fDesc').value    = data.desc  || '';
-    document.getElementById('fAmount').value  = data.amount || '';
-    document.getElementById('fDate').value    = data.date  || new Date().toISOString().slice(0,10);
-    document.getElementById('fNotes').value   = data.notes || '';
-    const catSel = document.getElementById('fCategory');
-    if (catSel) {
-      [...catSel.options].forEach(o => { if(o.value === data.cat) catSel.value = data.cat; });
+    
+    const fields = {
+      fDesc: data.desc || '',
+      fAmount: data.amount ? String(data.amount).replace('.', ',') : '',
+      fDate: data.date || new Date().toISOString().slice(0,10),
+      fNotes: data.notes || '',
+      fCategory: data.cat || 'other'
+    };
+
+    for (const [id, val] of Object.entries(fields)) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.value = val;
+        el.classList.add('ia-filled');
+        
+        const removeFn = () => {
+          el.classList.remove('ia-filled');
+          el.removeEventListener('focus', removeFn);
+          el.removeEventListener('input', removeFn);
+          el.removeEventListener('change', removeFn);
+        };
+        el.addEventListener('focus', removeFn);
+        el.addEventListener('input', removeFn);
+        el.addEventListener('change', removeFn);
+      }
     }
-    showToast(`✅ Nota analisada! Confira os dados e salve.`);
+    
+    if (typeof updateInstallmentPreview === 'function') {
+      updateInstallmentPreview();
+    }
+    
+    showToast(`✅ Nota analisada! Confira os dados em amarelo e salve.`);
   }, 200);
 }
 
@@ -154,7 +189,9 @@ function prefillTransactionFromReceipt(data) {
 let transactions = [];
 let budgets = [];
 let categories = [];
+let goals = [];
 let editingId = null;
+let editingGoalId = null;
 let currentType = 'expense';
 let chartMonthly = null, chartCategory = null, chartAnnual = null, chartTopCat = null, chartTrend = null;
 
@@ -184,9 +221,11 @@ function init() {
 function finishInit() {
   document.getElementById('loginOverlay').style.display = 'none';
   buildCategorySelects();
+  buildCardSelector();
   setDefaultDate();
   setDefaultFilterMonth();
   setupEventListeners();
+  setupDragAndDrop();
   navigate('dashboard');
   if (!currentUser) loadDemoDataIfEmpty();
 }
@@ -208,6 +247,8 @@ function loadData() {
   transactions = JSON.parse(localStorage.getItem('ff_transactions') || '[]');
   budgets      = JSON.parse(localStorage.getItem('ff_budgets')      || '[]');
   categories   = JSON.parse(localStorage.getItem('ff_categories')   || JSON.stringify(DEFAULT_CATEGORIES));
+  customCards  = JSON.parse(localStorage.getItem('ff_custom_cards')  || JSON.stringify(DEFAULT_CARDS));
+  goals        = JSON.parse(localStorage.getItem('ff_goals')         || '[]');
 }
 
 let isInitialSync = true;
@@ -219,9 +260,13 @@ function loadDataFromFirebase() {
       transactions = JSON.parse(data.transactions || '[]');
       budgets      = JSON.parse(data.budgets      || '[]');
       categories   = JSON.parse(data.categories   || JSON.stringify(DEFAULT_CATEGORIES));
+      customCards  = JSON.parse(data.customCards  || JSON.stringify(DEFAULT_CARDS));
+      goals        = JSON.parse(data.goals        || '[]');
       localStorage.setItem('ff_transactions', JSON.stringify(transactions));
       localStorage.setItem('ff_budgets',      JSON.stringify(budgets));
       localStorage.setItem('ff_categories',   JSON.stringify(categories));
+      localStorage.setItem('ff_custom_cards',  JSON.stringify(customCards));
+      localStorage.setItem('ff_goals',         JSON.stringify(goals));
     } else {
        if (isInitialSync) {
          loadData(); 
@@ -255,12 +300,16 @@ function saveData() {
   localStorage.setItem('ff_transactions', JSON.stringify(transactions));
   localStorage.setItem('ff_budgets',      JSON.stringify(budgets));
   localStorage.setItem('ff_categories',   JSON.stringify(categories));
+  localStorage.setItem('ff_custom_cards',  JSON.stringify(customCards));
+  localStorage.setItem('ff_goals',         JSON.stringify(goals));
   
   if (currentUser && db) {
     db.collection('users').doc(currentUser.uid).set({
       transactions: JSON.stringify(transactions),
       budgets: JSON.stringify(budgets),
       categories: JSON.stringify(categories),
+      customCards: JSON.stringify(customCards),
+      goals: JSON.stringify(goals),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }).catch(e => {
       console.error("Erro ao salvar nuvem", e);
@@ -315,7 +364,7 @@ function navigate(sec) {
   document.getElementById(`sec-${sec}`).classList.add('active');
   document.querySelector(`[data-section="${sec}"]`)?.classList.add('active');
 
-  const titles = { dashboard:'Dashboard', transactions:'Transações', cards:'Meus Cartões', budgets:'Orçamentos', reports:'Relatórios', settings:'Preferências' };
+  const titles = { dashboard:'Dashboard', transactions:'Transações', cards:'Meus Cartões', budgets:'Orçamentos', goals:'Metas', reports:'Relatórios', settings:'Preferências' };
   document.getElementById('topbarTitle').textContent = titles[sec] || sec;
 
   closeSidebar();
@@ -336,6 +385,7 @@ function renderSection(sec) {
   if (sec === 'transactions') renderTransactions();
   if (sec === 'cards')        renderCards();
   if (sec === 'budgets')      renderBudgets();
+  if (sec === 'goals')        renderGoals();
   if (sec === 'reports')      renderReports();
   if (sec === 'settings')     renderSettings();
 }
@@ -405,6 +455,24 @@ function buildCategorySelects() {
   });
 }
 
+function buildCardSelector() {
+  const el = document.getElementById('cardSelector');
+  if (!el) return;
+  el.innerHTML = customCards.map((c, index) => {
+    const initials = c.initials || c.name.slice(0, 2).toUpperCase();
+    return `<div class="card-chip ${index === 0 ? 'selected' : ''}" data-card="${c.id}" onclick="selectCard('${c.id}')">
+      <div class="chip-logo" style="background:${c.color}">${initials}</div>
+      ${c.name}
+    </div>`;
+  }).join('');
+  
+  if (customCards.length > 0) {
+    window._selectedCard = customCards[0].id;
+  } else {
+    window._selectedCard = 'outro';
+  }
+}
+
 // ── SMART AUTO-CATEGORY ──────────────────────────
 function detectCategory(desc) {
   const d = desc.toLowerCase();
@@ -438,6 +506,10 @@ function openModal(id = null) {
   document.getElementById('modalTitle').textContent = id ? 'Editar Transação' : 'Nova Transação';
   document.getElementById('catSuggestion').style.display = 'none';
 
+  buildCardSelector();
+
+  const defaultCard = customCards.length > 0 ? customCards[0].id : 'outro';
+
   if (id) {
     const tx = transactions.find(t => t.id === id);
     setType(tx.type);
@@ -452,7 +524,7 @@ function openModal(id = null) {
     document.getElementById('fRecurring').checked = tx.recurring || false;
     // Restore card selection
     window._editingId = id;
-    if (typeof selectCard === 'function') selectCard(tx.cardKey || 'inter');
+    if (typeof selectCard === 'function') selectCard(tx.cardKey || defaultCard);
     if (typeof onPaymentChange === 'function') onPaymentChange();
     // Restore installments
     const installEl = document.getElementById('fInstallments');
@@ -466,7 +538,7 @@ function openModal(id = null) {
     document.getElementById('fNotes').value  = '';
     document.getElementById('fRecurring').checked = false;
     setDefaultDate();
-    if (typeof selectCard === 'function') selectCard('inter');
+    if (typeof selectCard === 'function') selectCard(defaultCard);
     if (typeof onPaymentChange === 'function') onPaymentChange();
     const installEl = document.getElementById('fInstallments');
     if (installEl) installEl.value = '1';
@@ -498,7 +570,8 @@ function saveTransaction() {
   const installEl  = document.getElementById('fInstallments');
   const n          = (payment === 'credito' && installEl) ? (parseInt(installEl.value) || 1) : 1;
   const cardKey    = (payment === 'credito' || payment === 'debito') ? (window._selectedCard || 'outro') : null;
-  const cardLabel  = cardKey ? ({'inter':'Inter','nubank':'Nubank','amazon':'Amazon','outro':'Outro'}[cardKey] || cardKey) : null;
+  const cardObj    = customCards.find(c => c.id === cardKey);
+  const cardLabel  = cardObj ? cardObj.name : (cardKey ? cardKey : null);
 
   if (!desc)   { showToast('Informe uma descrição', 'error'); return; }
   if (!totalAmt || totalAmt <= 0) { showToast('Informe um valor válido', 'error'); return; }
@@ -807,6 +880,142 @@ function deleteBudget(id) {
   renderBudgets();
   checkAlerts();
   showToast('Orçamento removido', 'warning');
+}
+
+// ── METAS (GOALS) ──────────────────────────────────
+function openGoalModal() {
+  document.getElementById('gName').value = '';
+  document.getElementById('gEmoji').value = '🎯';
+  document.getElementById('gTargetDate').value = '';
+  document.getElementById('gTargetValue').value = '';
+  document.getElementById('gCurrentValue').value = '0';
+  document.getElementById('goalModal').classList.add('open');
+}
+
+function closeGoalModal() {
+  document.getElementById('goalModal').classList.remove('open');
+}
+
+function saveGoal() {
+  const name = document.getElementById('gName').value.trim();
+  const emoji = document.getElementById('gEmoji').value.trim() || '🎯';
+  const targetDate = document.getElementById('gTargetDate').value;
+  const targetValue = parseFloat(document.getElementById('gTargetValue').value);
+  const currentValue = parseFloat(document.getElementById('gCurrentValue').value) || 0;
+
+  if (!name) { showToast('Informe o nome da meta', 'error'); return; }
+  if (!targetValue || targetValue <= 0) { showToast('Informe um valor objetivo válido', 'error'); return; }
+  if (!targetDate) { showToast('Informe a data limite', 'error'); return; }
+
+  goals.push({
+    id: uid(),
+    name,
+    emoji,
+    targetDate,
+    targetValue,
+    currentValue,
+    createdAt: new Date().toISOString()
+  });
+
+  saveData();
+  closeGoalModal();
+  renderGoals();
+  showToast('Meta criada ✓', 'success');
+}
+
+function deleteGoal(id) {
+  if (!confirm('Deseja excluir esta meta?')) return;
+  goals = goals.filter(g => g.id !== id);
+  saveData();
+  renderGoals();
+  showToast('Meta excluída', 'warning');
+}
+
+function renderGoals() {
+  const el = document.getElementById('goalsGrid');
+  if (!el) return;
+
+  if (goals.length === 0) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🏆</div><p>Nenhuma meta definida.<br>Clique em "+ Nova Meta" para começar.</p></div>`;
+    return;
+  }
+
+  el.innerHTML = goals.map(g => {
+    const pct = Math.min(100, (g.currentValue / g.targetValue) * 100);
+    const color = pct >= 100 ? 'var(--green)' : pct >= 50 ? 'var(--accent-bright)' : 'var(--yellow)';
+    const dateStr = g.targetDate ? new Date(g.targetDate+'T00:00:00').toLocaleDateString('pt-BR') : '';
+
+    return `
+      <div class="budget-card animate-fade-in">
+        <div class="budget-card-header">
+          <span class="budget-card-emoji">${g.emoji || '🏆'}</span>
+          <div style="display:flex; gap: 8px;">
+            <button class="btn btn-ghost btn-sm" onclick="openAporteModal('${g.id}')">Aportar</button>
+            <button class="budget-delete" onclick="deleteGoal('${g.id}')">✕</button>
+          </div>
+        </div>
+        <div class="budget-card-title">${g.name}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">Alvo: ${dateStr}</div>
+        <div class="budget-big-bar" style="background: rgba(255,255,255,0.05);"><div class="budget-big-fill" style="width:${pct}%;background:${color}"></div></div>
+        <div class="budget-amounts">
+          <span class="budget-spent">Guardado: R$ ${fmt(g.currentValue)}</span>
+          <span class="budget-limit">Objetivo: R$ ${fmt(g.targetValue)} (${pct.toFixed(0)}%)</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+let activeAporteGoalId = null;
+
+function openAporteModal(goalId) {
+  activeAporteGoalId = goalId;
+  const g = goals.find(x => x.id === goalId);
+  if (!g) return;
+  document.getElementById('aporteGoalLabel').textContent = `Adicionar valor à meta "${g.name}":`;
+  document.getElementById('aporteValue').value = '';
+  document.getElementById('aporteRegisterTx').checked = true;
+  document.getElementById('aporteModal').classList.add('open');
+}
+
+function closeAporteModal() {
+  document.getElementById('aporteModal').classList.remove('open');
+  activeAporteGoalId = null;
+}
+
+function saveAporte() {
+  const val = parseFloat(document.getElementById('aporteValue').value);
+  if (!val || val <= 0) { showToast('Informe um valor de aporte válido', 'error'); return; }
+
+  const g = goals.find(x => x.id === activeAporteGoalId);
+  if (!g) { closeAporteModal(); return; }
+
+  g.currentValue += val;
+
+  const registerTx = document.getElementById('aporteRegisterTx').checked;
+  if (registerTx) {
+    // Registrar transação como "investimento" (Saída)
+    transactions.push({
+      id: uid(),
+      type: 'expense',
+      desc: `Aporte meta: ${g.name}`,
+      amount: val,
+      date: new Date().toISOString().slice(0,10),
+      cat: 'investment',
+      payment: 'Pix',
+      notes: `Aporte automático para a meta ${g.name}`,
+      recurring: false,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  saveData();
+  closeAporteModal();
+  renderGoals();
+  if (currentSection() === 'dashboard') {
+    renderDashboard();
+  }
+  showToast(`Aporte de R$ ${fmt(val)} realizado com sucesso!`, 'success');
 }
 
 // ── ALERTS ───────────────────────────────────────
@@ -1220,6 +1429,7 @@ function renderReportTable() {
 
 // ── SETTINGS ─────────────────────────────────────
 function renderSettings() {
+  // Categorias
   const el = document.getElementById('categoryList');
   const defaults = DEFAULT_CATEGORIES.map(c=>c.id);
   const custom = categories.filter(c => !defaults.includes(c.id));
@@ -1233,6 +1443,69 @@ function renderSettings() {
       <button class="cat-del" onclick="deleteCategory('${c.id}')">✕</button>
     </div>`).join('');
   }
+
+  // Cartões
+  const elCards = document.getElementById('customCardsList');
+  if (elCards) {
+    if (customCards.length === 0) {
+      elCards.innerHTML = '<p style="color:var(--text2);font-size:13px;margin-bottom:8px">Nenhum cartão cadastrado.</p>';
+    } else {
+      elCards.innerHTML = customCards.map(c => `<div class="cat-item">
+        <div class="cat-dot" style="background:${c.color}"></div>
+        <span class="cat-name">${c.name} (${c.initials || 'CC'}) — Limite: R$ ${fmt(c.limit)}</span>
+        <button class="cat-del" onclick="deleteCustomCard('${c.id}')">✕</button>
+      </div>`).join('');
+    }
+  }
+
+  // Gemini API Key
+  const apiKeyInput = document.getElementById('geminiApiKeyInput');
+  if (apiKeyInput) {
+    apiKeyInput.value = localStorage.getItem('ff_gemini_api_key') || '';
+  }
+}
+
+function saveGeminiApiKey() {
+  const val = document.getElementById('geminiApiKeyInput').value.trim();
+  if (val) {
+    localStorage.setItem('ff_gemini_api_key', val);
+    GEMINI_API_KEY = val;
+    showToast('Chave API do Gemini salva ✓', 'success');
+  } else {
+    localStorage.removeItem('ff_gemini_api_key');
+    GEMINI_API_KEY = 'AIzaSyBMrHsPG86oTgfsoXsVOC3bZ7pEIkk9fo0'; // fallback
+    showToast('Chave API redefinida para o padrão', 'warning');
+  }
+}
+
+function addCustomCard() {
+  const name = document.getElementById('newCardName').value.trim();
+  const initials = document.getElementById('newCardInitials').value.trim().toUpperCase();
+  const limit = parseFloat(document.getElementById('newCardLimit').value);
+  const color = document.getElementById('newCardColor').value;
+
+  if (!name) { showToast('Informe o nome do cartão', 'error'); return; }
+  if (!limit || limit <= 0) { showToast('Informe um limite válido', 'error'); return; }
+
+  const id = 'card_' + Date.now();
+  customCards.push({ id, name, initials: initials || name.slice(0,2).toUpperCase(), color, limit });
+  saveData();
+  buildCardSelector();
+  renderSettings();
+
+  document.getElementById('newCardName').value = '';
+  document.getElementById('newCardInitials').value = '';
+  document.getElementById('newCardLimit').value = '';
+  showToast('Cartão adicionado ✓', 'success');
+}
+
+function deleteCustomCard(id) {
+  if (!confirm('Excluir este cartão?')) return;
+  customCards = customCards.filter(c => c.id !== id);
+  saveData();
+  buildCardSelector();
+  renderSettings();
+  showToast('Cartão removido', 'warning');
 }
 
 function addCustomCategory() {
@@ -1551,14 +1824,12 @@ function renderCards() {
   const el = document.getElementById('cardsGrid');
   if (!el) return;
 
-  const knownCards = [
-    { id: 'inter',  name: 'Inter',  initials: 'IN' },
-    { id: 'nubank', name: 'Nubank', initials: 'NU' },
-    { id: 'amazon', name: 'Amazon', initials: 'AZ' },
-    { id: 'outro',  name: 'Outro',  initials: '++' }
-  ];
+  if (customCards.length === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">💳</div><p>Nenhum cartão cadastrado. Vá em Preferências para adicionar.</p></div>';
+    return;
+  }
 
-  const html = knownCards.map(c => {
+  const html = customCards.map(c => {
     const isThisCard = (t) => {
       if (t.type !== 'expense') return false;
       if (t.cardKey) return t.cardKey === c.id;
@@ -1588,11 +1859,14 @@ function renderCards() {
             <span class="cc-val-pending" style="color:#f59e0b">R$ ${fmt(pendingTotal)} (${pendingCount}x)</span>
           </div>` : '';
 
+    const limitSpent = monthlyAmount + pendingTotal;
+    const limitPct = Math.min(100, (limitSpent / c.limit) * 100);
+
     return `
-      <div class="cc-widget cc-${c.id}">
+      <div class="cc-widget animate-fade-in" style="--chip-bg: ${c.color}; border-top-color: ${c.color.replace('linear-gradient(135deg,', '').split(',')[0]}33;">
         <div class="cc-header">
           <h3>${c.name}</h3>
-          <div class="cc-brand-icon">${c.initials}</div>
+          <div class="cc-brand-icon" style="background: ${c.color}">${c.initials}</div>
         </div>
         <div class="cc-stats">
           <div class="cc-stat-row">
@@ -1601,8 +1875,13 @@ function renderCards() {
           </div>
           ${pendingHtml}
           <div class="cc-stat-row">
-            <span class="cc-stat-label">Gasto Total Acumulado</span>
-            <span class="cc-val-total">R$ ${fmt(totalAmount)}</span>
+            <span class="cc-stat-label">Limite Disponível</span>
+            <span class="cc-val-total" style="color: ${limitSpent >= c.limit ? 'var(--red)' : 'var(--green)'}">R$ ${fmt(Math.max(0, c.limit - limitSpent))} / R$ ${fmt(c.limit)}</span>
+          </div>
+          <div class="cc-stat-row">
+            <div class="budget-bar" style="background: rgba(255,255,255,0.05); height: 6px;">
+              <div class="budget-bar-fill" style="width: ${limitPct}%; background: ${c.color}"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -1617,6 +1896,68 @@ function showToast(msg, type='success') {
   t.textContent = msg;
   t.className = `toast ${type} show`;
   setTimeout(()=>{ t.classList.remove('show'); }, 3000);
+}
+
+// ── DRAG & DROP FILE IMPORT ───────────────────────
+function setupDragAndDrop() {
+  const overlay = document.getElementById('dragOverlay');
+  if (!overlay) return;
+
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    overlay.style.display = 'flex';
+  });
+
+  const hideOverlay = () => {
+    overlay.style.display = 'none';
+  };
+
+  window.addEventListener('dragleave', (e) => {
+    if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+      hideOverlay();
+    }
+  });
+
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    hideOverlay();
+
+    const files = e.dataTransfer.files;
+    if (files.length === 0) return;
+
+    const file = files[0];
+    const name = file.name.toLowerCase();
+
+    if (name.endsWith('.csv')) {
+      showToast('Importando CSV...', 'warning');
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        parseCSVAndImport(evt.target.result);
+      };
+      reader.readAsText(file);
+    } else if (file.type.startsWith('image/')) {
+      const scanOverlay = document.getElementById('scanOverlay');
+      if (scanOverlay) {
+        const previewImg = document.getElementById('scanPreview');
+        if (previewImg) {
+          previewImg.src = URL.createObjectURL(file);
+        }
+        scanOverlay.style.display = 'flex';
+      }
+      try {
+        const base64 = await fileToBase64(file);
+        const result = await analyzeReceiptWithGemini(base64, file.type);
+        if (scanOverlay) scanOverlay.style.display = 'none';
+        prefillTransactionFromReceipt(result);
+      } catch (err) {
+        if (scanOverlay) scanOverlay.style.display = 'none';
+        console.error('Erro ao escanear nota via drag & drop:', err);
+        alert('❌ Não foi possível analisar a imagem. Tente uma foto mais clara da nota fiscal.');
+      }
+    } else {
+      showToast('Formato de arquivo não suportado!', 'error');
+    }
+  });
 }
 
 // ── START ─────────────────────────────────────────
