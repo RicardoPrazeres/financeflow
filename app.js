@@ -264,6 +264,7 @@ function init() {
   if (auth) {
     auth.getRedirectResult().then(result => {
       if (result && result.user) {
+        localStorage.removeItem('ff_guest_mode');
         showToast(`Login realizado! Bem-vindo(a) ${result.user.displayName || ''} 👋`, 'success');
       }
     }).catch(err => {
@@ -285,12 +286,18 @@ function init() {
 
     auth.onAuthStateChanged(user => {
       if (user) {
+        localStorage.removeItem('ff_guest_mode');
         currentUser = user;
         document.getElementById('loginOverlay').style.display = 'none';
         loadDataFromFirebase();
       } else {
         currentUser = null;
-        document.getElementById('loginOverlay').style.display = 'flex';
+        if (localStorage.getItem('ff_guest_mode') === 'true') {
+          loadData();
+          finishInit();
+        } else {
+          document.getElementById('loginOverlay').style.display = 'flex';
+        }
       }
     });
   } else {
@@ -363,6 +370,7 @@ function processRecurringTransactions() {
 }
 
 function loginWithGoogle() {
+  localStorage.removeItem('ff_guest_mode');
   if (typeof firebase === 'undefined' || !auth) {
     showToast('Firebase não disponível. Ativando Modo Local...', 'warning');
     useGuestMode();
@@ -371,11 +379,11 @@ function loginWithGoogle() {
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
 
-  // signInWithRedirect é mais confiável em PWAs, mobile e domínios como Vercel
   auth.signInWithRedirect(provider);
 }
 
 function useGuestMode() {
+  localStorage.setItem('ff_guest_mode', 'true');
   currentUser = null;
   loadData();
   finishInit();
@@ -383,7 +391,14 @@ function useGuestMode() {
 }
 
 function logout() {
-  if (auth) auth.signOut();
+  localStorage.removeItem('ff_guest_mode');
+  if (auth) {
+    auth.signOut().then(() => {
+      document.getElementById('loginOverlay').style.display = 'flex';
+    });
+  } else {
+    document.getElementById('loginOverlay').style.display = 'flex';
+  }
 }
 
 function loadData() {
