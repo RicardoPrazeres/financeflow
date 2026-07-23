@@ -262,6 +262,14 @@ let selectedIds = new Set();
 // ── INIT ─────────────────────────────────────────
 function init() {
   if (auth) {
+    auth.getRedirectResult().then(result => {
+      if (result && result.user) {
+        showToast(`Login realizado! Bem-vindo(a) ${result.user.displayName || ''} 👋`, 'success');
+      }
+    }).catch(err => {
+      console.error('Erro no resultado do redirecionamento:', err);
+    });
+
     auth.onAuthStateChanged(user => {
       if (user) {
         currentUser = user;
@@ -343,11 +351,35 @@ function processRecurringTransactions() {
 
 function loginWithGoogle() {
   if (typeof firebase === 'undefined' || !auth) {
-    alert('❌ O Google Firebase não pôde ser carregado. Verifique sua conexão e tente novamente.');
+    showToast('Firebase não disponível. Ativando Modo Convidado...', 'warning');
+    useGuestMode();
     return;
   }
   const provider = new firebase.auth.GoogleAuthProvider();
-  auth.signInWithPopup(provider).catch(err => alert('Erro no login: ' + err.message));
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  auth.signInWithPopup(provider)
+    .then(result => {
+      showToast(`Bem-vindo(a), ${result.user.displayName || 'Usuário'}! 👋`, 'success');
+    })
+    .catch(err => {
+      console.error('Erro no Login Google:', err);
+      if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user') {
+        showToast('Tentando login por redirecionamento...', 'info');
+        auth.signInWithRedirect(provider);
+      } else if (err.code === 'auth/unauthorized-domain') {
+        alert('⚠️ Domínio não autorizado no Firebase Console.\n\nPara resolver:\n1. Acesse o Firebase Console (projectId: financeflow-98869)\n2. Vá em Authentication > Settings > Authorized domains\n3. Adicione o domínio atual.\n\nVocê também pode usar o botão "Continuar sem login (Modo Local)".');
+      } else {
+        alert('⚠️ Não foi possível realizar o login com o Google.\nMotivo: ' + (err.message || err.code) + '\n\nVocê pode continuar usando o app no Modo Local (offline).');
+      }
+    });
+}
+
+function useGuestMode() {
+  currentUser = null;
+  loadData();
+  finishInit();
+  showToast('Modo Local (Offline) ativado ⚡', 'info');
 }
 
 function logout() {
