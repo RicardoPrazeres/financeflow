@@ -54,7 +54,63 @@ if (typeof firebase !== 'undefined') {
     .catch(err => console.error("Auth persistence setup erro: ", err));
 }
 
-let GEMINI_API_KEY = localStorage.getItem('ff_gemini_api_key') || 'AIzaSyBMrHsPG86oTgfsoXsVOC3bZ7pEIkk9fo0';
+let GEMINI_API_KEY = localStorage.getItem('ff_gemini_api_key') || '';
+
+function escapeHTML(str) {
+  if (typeof str !== 'string') return str || '';
+  return str.replace(/[&<>"']/g, function(m) {
+    return {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[m];
+  });
+}
+
+// ── HELPER FUNCTIONS (LOCAL DATES & AMOUNT PARSING) ───
+function getTodayStr() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getCurrentMonthStr() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function getSafeMonthDate(year, monthIndex, day) {
+  const targetDate = new Date(year, monthIndex, 1);
+  const targetYear = targetDate.getFullYear();
+  const targetMonth = targetDate.getMonth();
+  const maxDays = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const safeDay = Math.min(day, maxDays);
+  const result = new Date(targetYear, targetMonth, safeDay);
+  return result.getFullYear() + '-' + String(result.getMonth() + 1).padStart(2, '0') + '-' + String(result.getDate()).padStart(2, '0');
+}
+
+function parseAmount(amtRaw) {
+  if (typeof amtRaw === 'number') return isNaN(amtRaw) ? 0 : amtRaw;
+  if (!amtRaw) return 0;
+  let str = String(amtRaw).replace(/R\$\s*/gi, '').replace(/[\u00A0\s]/g, '').trim();
+  if (str.includes(',') && str.includes('.')) {
+    if (str.indexOf('.') < str.indexOf(',')) {
+      str = str.replace(/\./g, '').replace(',', '.');
+    } else {
+      str = str.replace(/,/g, '');
+    }
+  } else if (str.includes(',')) {
+    str = str.replace(',', '.');
+  }
+  const parsed = parseFloat(str);
+  return isNaN(parsed) ? 0 : parsed;
+}
 
 const DEFAULT_CARDS = [
   { id: 'inter',  name: 'Inter',  initials: 'IN', color: 'linear-gradient(135deg,#f97316,#ea580c)', limit: 5000 },
@@ -103,6 +159,10 @@ function fileToBase64(file) {
 }
 
 async function analyzeReceiptWithGemini(base64, mimeType) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('Chave da API do Gemini não configurada. Por favor, insira sua chave nas Configurações.');
+  }
+
   const prompt = `Analise esta imagem de nota fiscal ou comprovante de pagamento.
 Extraia as informações da transação e retorne APENAS um JSON válido, sem markdown, sem explicações extras.
 Formato exato:
@@ -226,8 +286,59 @@ function finishInit() {
   setDefaultFilterMonth();
   setupEventListeners();
   setupDragAndDrop();
+  processRecurringTransactions();
   navigate('dashboard');
   if (!currentUser) loadDemoDataIfEmpty();
+}
+
+function processRecurringTransactions() {
+  if (!transactions || transactions.length === 0) return;
+
+  const currentMonth = getCurrentMonthStr();
+  const recurringTxs = transactions.filter(t => t.recurring);
+  if (recurringTxs.length === 0) return;
+
+  const templatesMap = new Map();
+  recurringTxs.forEach(t => {
+    const key = `${t.desc.toLowerCase()}|${t.cat}|${t.amount}`;
+    if (!templatesMap.has(key)) {
+      templatesMap.set(key, t);
+    }
+  });
+
+  let createdCount = 0;
+  templatesMap.forEach(tpl => {
+    const existsThisMonth = transactions.some(t => 
+      t.date && t.date.slice(0, 7) === currentMonth &&
+      t.desc.toLowerCase() === tpl.desc.toLowerCase() &&
+      t.cat === tpl.cat
+    );
+
+    if (!existsThisMonth) {
+      const targetDate = `${currentMonth}-01`;
+      transactions.push({
+        id: uid(),
+        type: tpl.type || 'expense',
+        desc: tpl.desc,
+        amount: tpl.amount,
+        date: targetDate,
+        cat: tpl.cat,
+        payment: tpl.payment || 'outro',
+        notes: (tpl.notes ? tpl.notes + ' ' : '') + '(Recorrente automático)',
+        recurring: true,
+        cardKey: tpl.cardKey || null,
+        cardLabel: tpl.cardLabel || null,
+        installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null,
+        createdAt: new Date().toISOString()
+      });
+      createdCount++;
+    }
+  });
+
+  if (createdCount > 0) {
+    saveData();
+    showToast(`${createdCount} despesa(s) recorrente(s) gerada(s) para este mês 🔄`, 'info');
+  }
 }
 
 function loginWithGoogle() {
@@ -559,8 +670,7 @@ function setType(type) {
 
 function saveTransaction() {
   const desc      = document.getElementById('fDesc').value.trim();
-  const rawAmt    = document.getElementById('fAmount').value.replace(',', '.');
-  const totalAmt  = parseFloat(rawAmt);
+  const totalAmt  = parseAmount(document.getElementById('fAmount').value);
   const date      = document.getElementById('fDate').value;
   const cat       = document.getElementById('fCategory').value;
   const payment   = document.getElementById('fPayment').value;
@@ -579,6 +689,14 @@ function saveTransaction() {
 
   const savedAmount = n > 1 ? +(totalAmt / n).toFixed(2) : totalAmt;
 
+  const [yy, mm, dd] = date.split('-').map(Number);
+  let monthOffset = 0;
+  if (payment === 'credito' && cardObj && cardObj.closingDay) {
+    if (dd > parseInt(cardObj.closingDay)) {
+      monthOffset = 1;
+    }
+  }
+
   if (editingId) {
     const idx = transactions.findIndex(t => t.id === editingId);
     if (idx === -1) { closeModal(); return; }
@@ -587,25 +705,14 @@ function saveTransaction() {
     const gid = oldTx.installmentGroupId;
 
     if (gid) {
-      // Era um grupo. Vamos recalcular a data de início (mês 1) com base na transação editada
-      const [y, m, d] = date.split('-').map(Number);
-      const dObj = new Date(y, m - 1 - (oldTx.installmentPaid - 1), d);
-      const startDate = dObj.getFullYear() + '-' + String(dObj.getMonth() + 1).padStart(2, '0') + '-' + String(dObj.getDate()).padStart(2, '0');
+      const startDate = getSafeMonthDate(yy, (mm - 1) + monthOffset - (oldTx.installmentPaid - 1), dd);
 
-      // Remove todo o grupo antigo
       transactions = transactions.filter(t => t.installmentGroupId !== gid);
 
       if (n > 1) {
-        // Recria o grupo com os novos dados e quantidade de parcelas (n)
-        const [yy, mm, dd] = startDate.split('-').map(Number);
+        const [sy, sm, sd] = startDate.split('-').map(Number);
         for (let i = 1; i <= n; i++) {
-          let loopDateStr = startDate;
-          if (i > 1) {
-            const di = new Date(yy, mm - 1 + (i - 1), dd);
-            const targetMonth = ((mm - 1 + (i - 1)) % 12 + 12) % 12;
-            if (di.getMonth() !== targetMonth) di.setDate(0); 
-            loopDateStr = di.getFullYear() + '-' + String(di.getMonth() + 1).padStart(2, '0') + '-' + String(di.getDate()).padStart(2, '0');
-          }
+          const loopDateStr = getSafeMonthDate(sy, (sm - 1) + (i - 1), sd);
           transactions.push({
             id:uid(), type:currentType, desc, amount:savedAmount, date:loopDateStr, cat, payment, notes, recurring,
             cardKey, cardLabel,
@@ -614,29 +721,19 @@ function saveTransaction() {
           });
         }
       } else {
-        // Mudou de parcelado para único. Já removemos o grupo, agora adicionamos apenas este
         transactions.push({
-          id:uid(), type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
+          id:uid(), type:currentType, desc, amount:savedAmount, date: startDate, cat, payment, notes, recurring,
           cardKey, cardLabel,
           installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null,
           createdAt:new Date().toISOString()
         });
       }
     } else {
-      // Era uma transação individual
       if (n > 1) {
-        // Mudou de individual para parcelado
         transactions.splice(idx, 1);
         const newGid = uid();
-        const [yy, mm, dd] = date.split('-').map(Number);
         for (let i = 1; i <= n; i++) {
-          let loopDateStr = date;
-          if (i > 1) {
-            const di = new Date(yy, mm - 1 + (i - 1), dd);
-            const targetMonth = ((mm - 1 + (i - 1)) % 12 + 12) % 12;
-            if (di.getMonth() !== targetMonth) di.setDate(0); 
-            loopDateStr = di.getFullYear() + '-' + String(di.getMonth() + 1).padStart(2, '0') + '-' + String(di.getDate()).padStart(2, '0');
-          }
+          const loopDateStr = getSafeMonthDate(yy, (mm - 1) + monthOffset + (i - 1), dd);
           transactions.push({
             id:uid(), type:currentType, desc, amount:savedAmount, date:loopDateStr, cat, payment, notes, recurring,
             cardKey, cardLabel,
@@ -645,10 +742,10 @@ function saveTransaction() {
           });
         }
       } else {
-        // Apenas atualiza a individual
+        const txDate = monthOffset === 1 ? getSafeMonthDate(yy, (mm - 1) + monthOffset, dd) : date;
         transactions[idx] = {
           ...transactions[idx],
-          type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
+          type:currentType, desc, amount:savedAmount, date: txDate, cat, payment, notes, recurring,
           cardKey, cardLabel,
           installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null
         };
@@ -656,22 +753,10 @@ function saveTransaction() {
     }
     showToast('Transação atualizada ✓', 'success');
   } else {
-    // Se for parcelado, cria 'n' transações para os meses seguintes
     if (n > 1) {
       const groupId = uid();
-      const [yy, mm, dd] = date.split('-').map(Number);
-      
       for (let i = 1; i <= n; i++) {
-        let loopDateStr = date;
-        if (i > 1) {
-          const dObj = new Date(yy, mm - 1 + (i - 1), dd);
-          // Ajuste para evitar que dia 31 pule para o mês errado (ex: 31 Jan -> 3 Março)
-          const targetMonth = ((mm - 1 + (i - 1)) % 12 + 12) % 12;
-          if (dObj.getMonth() !== targetMonth) {
-            dObj.setDate(0); 
-          }
-          loopDateStr = dObj.getFullYear() + '-' + String(dObj.getMonth() + 1).padStart(2, '0') + '-' + String(dObj.getDate()).padStart(2, '0');
-        }
+        const loopDateStr = getSafeMonthDate(yy, (mm - 1) + monthOffset + (i - 1), dd);
 
         transactions.push({
           id:uid(), type:currentType, desc, amount:savedAmount, date:loopDateStr, cat, payment, notes, recurring,
@@ -684,15 +769,16 @@ function saveTransaction() {
           createdAt:new Date().toISOString()
         });
       }
-      showToast(`Compra parcelada: ${n}x de R$ ${(savedAmount).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} ✓`, 'success');
+      showToast(`Compra parcelada: ${n}x de R$ ${(savedAmount).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} ${monthOffset === 1 ? '(mês seguinte)' : ''} ✓`, 'success');
     } else {
+      const txDate = monthOffset === 1 ? getSafeMonthDate(yy, (mm - 1) + monthOffset, dd) : date;
       transactions.push({
-        id:uid(), type:currentType, desc, amount:savedAmount, date, cat, payment, notes, recurring,
+        id:uid(), type:currentType, desc, amount:savedAmount, date: txDate, cat, payment, notes, recurring,
         cardKey, cardLabel,
         installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null,
         createdAt:new Date().toISOString()
       });
-      showToast('Transação adicionada ✓', 'success');
+      showToast(monthOffset === 1 ? 'Lançado na fatura do mês seguinte (após fechamento) 💳' : 'Transação adicionada ✓', 'success');
     }
   }
 
@@ -1452,7 +1538,7 @@ function renderSettings() {
     } else {
       elCards.innerHTML = customCards.map(c => `<div class="cat-item">
         <div class="cat-dot" style="background:${c.color}"></div>
-        <span class="cat-name">${c.name} (${c.initials || 'CC'}) — Limite: R$ ${fmt(c.limit)}</span>
+        <span class="cat-name">${c.name} (${c.initials || 'CC'}) — Limite: R$ ${fmt(c.limit)}${c.closingDay ? ` | Fecha dia ${c.closingDay}` : ''}${c.dueDay ? ` (Vence dia ${c.dueDay})` : ''}</span>
         <button class="cat-del" onclick="deleteCustomCard('${c.id}')">✕</button>
       </div>`).join('');
     }
@@ -1473,22 +1559,26 @@ function saveGeminiApiKey() {
     showToast('Chave API do Gemini salva ✓', 'success');
   } else {
     localStorage.removeItem('ff_gemini_api_key');
-    GEMINI_API_KEY = 'AIzaSyBMrHsPG86oTgfsoXsVOC3bZ7pEIkk9fo0'; // fallback
-    showToast('Chave API redefinida para o padrão', 'warning');
+    GEMINI_API_KEY = '';
+    showToast('Chave API redefinida', 'warning');
   }
 }
 
 function addCustomCard() {
   const name = document.getElementById('newCardName').value.trim();
   const initials = document.getElementById('newCardInitials').value.trim().toUpperCase();
-  const limit = parseFloat(document.getElementById('newCardLimit').value);
+  const limit = parseAmount(document.getElementById('newCardLimit').value);
   const color = document.getElementById('newCardColor').value;
+  const closingDayEl = document.getElementById('newCardClosingDay');
+  const dueDayEl = document.getElementById('newCardDueDay');
+  const closingDay = closingDayEl ? (parseInt(closingDayEl.value) || null) : null;
+  const dueDay = dueDayEl ? (parseInt(dueDayEl.value) || null) : null;
 
   if (!name) { showToast('Informe o nome do cartão', 'error'); return; }
   if (!limit || limit <= 0) { showToast('Informe um limite válido', 'error'); return; }
 
   const id = 'card_' + Date.now();
-  customCards.push({ id, name, initials: initials || name.slice(0,2).toUpperCase(), color, limit });
+  customCards.push({ id, name, initials: initials || name.slice(0,2).toUpperCase(), color, limit, closingDay, dueDay });
   saveData();
   buildCardSelector();
   renderSettings();
@@ -1496,6 +1586,8 @@ function addCustomCard() {
   document.getElementById('newCardName').value = '';
   document.getElementById('newCardInitials').value = '';
   document.getElementById('newCardLimit').value = '';
+  if (closingDayEl) closingDayEl.value = '';
+  if (dueDayEl) dueDayEl.value = '';
   showToast('Cartão adicionado ✓', 'success');
 }
 
@@ -1672,10 +1764,7 @@ function parseCSVAndImport(csvText) {
 
   function addMonths(dateStr, n) {
     const [y, m, d] = dateStr.split('-').map(Number);
-    const dt = new Date(y, m - 1 + n, d);
-    const targetMon = ((m - 1 + n) % 12 + 12) % 12;
-    if (dt.getMonth() !== targetMon) dt.setDate(0);
-    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+    return getSafeMonthDate(y, (m - 1) + n, d);
   }
 
   let importedCount = 0, skippedCount = 0;
@@ -1696,9 +1785,7 @@ function parseCSVAndImport(csvText) {
     const desc = cleanDesc(descRaw);
     if (!desc) { skippedCount++; continue; }
 
-    // Limpeza de valor blindada
-    const amtClean = amtRaw.replace(/R\$\s*/gi, '').replace(/[\u00A0\s]/g, '').replace(/\./g, '').replace(',', '.').trim();
-    const amount = parseFloat(amtClean);
+    const amount = parseAmount(amtRaw);
     if (isNaN(amount)) { skippedCount++; continue; }
 
     if (amount < 0 && /pagto|pagamento|debito automat/i.test(desc)) { skippedCount++; continue; }
@@ -1783,10 +1870,74 @@ function exportCSV() {
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href = url;
-  a.download = `financeflow_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `financeflow_${getTodayStr()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
   showToast('Exportado com sucesso ✓', 'success');
+}
+
+function exportJSON() {
+  const data = {
+    version: 1,
+    exportDate: new Date().toISOString(),
+    transactions,
+    customCategories,
+    customCards,
+    goals,
+    budgets,
+    GEMINI_API_KEY
+  };
+  const jsonStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `financeflow_backup_${getTodayStr()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Backup exportado com sucesso! 💾', 'success');
+}
+
+function triggerImportJSON() {
+  const input = document.getElementById('jsonFileInput');
+  if (input) input.click();
+}
+
+function handleImportJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data || !Array.isArray(data.transactions)) {
+        throw new Error('Formato do arquivo de backup inválido');
+      }
+
+      if (confirm(`Deseja importar ${data.transactions.length} transações? Seus dados atuais serão sobrescritos.`)) {
+        transactions = data.transactions || [];
+        if (data.customCategories) customCategories = data.customCategories;
+        if (data.customCards) customCards = data.customCards;
+        if (data.goals) goals = data.goals;
+        if (data.budgets) budgets = data.budgets;
+        if (data.GEMINI_API_KEY) {
+          GEMINI_API_KEY = data.GEMINI_API_KEY;
+          localStorage.setItem('ff_gemini_api_key', GEMINI_API_KEY);
+        }
+
+        saveData();
+        renderSection(currentSection());
+        renderDashboardKPIs();
+        showToast('Backup restaurado com sucesso! ✓', 'success');
+      }
+    } catch (err) {
+      console.error('Erro ao importar JSON:', err);
+      showToast('Erro ao ler arquivo de backup JSON: ' + err.message, 'error');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
 }
 
 // ── CHART DEFAULTS ───────────────────────────────
@@ -1869,6 +2020,10 @@ function renderCards() {
           <div class="cc-brand-icon" style="background: ${c.color}">${c.initials}</div>
         </div>
         <div class="cc-stats">
+          <div class="cc-stat-row" style="font-size:12px;color:var(--text-muted);margin-top:2px;">
+            <span>📅 Fechamento: <strong>${c.closingDay ? 'Dia ' + c.closingDay : 'Não def.'}</strong></span>
+            <span>💳 Vencimento: <strong>${c.dueDay ? 'Dia ' + c.dueDay : 'Não def.'}</strong></span>
+          </div>
           <div class="cc-stat-row">
             <span class="cc-stat-label">Gasto no Mês</span>
             <span class="cc-val-monthly">R$ ${fmt(monthlyAmount)}</span>
@@ -1959,6 +2114,19 @@ function setupDragAndDrop() {
     }
   });
 }
+
+// ── KEYBOARD SHORTCUTS & ACCESSIBILITY ────────────────
+window.addEventListener('keydown', (e) => {
+  const activeEl = document.activeElement;
+  const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
+
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal.open').forEach(m => m.classList.remove('open'));
+  } else if ((e.key === 'n' || e.key === 'N') && !isTyping && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    if (typeof openModal === 'function') openModal('expense');
+  }
+});
 
 // ── START ─────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);

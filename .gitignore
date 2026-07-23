@@ -1,0 +1,11 @@
+# Node / Vite
+node_modules/
+dist/
+.DS_Store
+
+# Temporary logs and dumps
+*.log
+cardslog*.txt
+diff.txt
+.env
+.env.local

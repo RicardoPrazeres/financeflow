@@ -572,6 +572,10 @@
               <input type="text" id="newCardInitials" placeholder="Sigla (ex: C6)" class="filter-input" style="max-width:90px; text-align:center;">
               <input type="text" id="newCardName" placeholder="Nome do Cartão" class="filter-input" style="flex:1;">
             </div>
+            <div style="display:flex; gap:10px;">
+              <input type="number" id="newCardClosingDay" placeholder="Dia Fechamento (ex: 5)" min="1" max="31" class="filter-input" style="flex:1;">
+              <input type="number" id="newCardDueDay" placeholder="Dia Vencimento (ex: 12)" min="1" max="31" class="filter-input" style="flex:1;">
+            </div>
             <div style="display:flex; gap:10px; align-items:center;">
               <input type="number" id="newCardLimit" placeholder="Limite (R$)" class="filter-input" style="flex:1;">
               <select id="newCardColor" class="filter-input" style="flex:1;">
@@ -600,6 +604,9 @@
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇ Exportar CSV</button>
             <button class="btn btn-ghost btn-sm" onclick="triggerImportCSV()">⬆ Importar CSV</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportJSON()">💾 Exportar Backup (JSON)</button>
+            <button class="btn btn-ghost btn-sm" onclick="triggerImportJSON()">📂 Restaurar Backup (JSON)</button>
+            <input type="file" id="jsonFileInput" accept=".json" style="display:none" onchange="handleImportJSON(event)">
             <button class="btn btn-danger btn-sm" onclick="clearAllData()">🗑 Limpar Todos os Dados</button>
             <button class="btn btn-primary btn-sm" onclick="logout()"
               style="background:var(--surface3);color:var(--text);border:1px solid var(--border)">🚪 Sair da Conta
