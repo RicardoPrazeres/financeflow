@@ -268,6 +268,19 @@ function init() {
       }
     }).catch(err => {
       console.error('Erro no resultado do redirecionamento:', err);
+      const currentDomain = window.location.hostname;
+      if (err.code === 'auth/unauthorized-domain') {
+        alert(
+          '⚠️ Login com Google bloqueado!\n\n' +
+          'O domínio "' + currentDomain + '" não está autorizado no Firebase.\n\n' +
+          'Para resolver:\n' +
+          '1. Acesse: https://console.firebase.google.com/project/financeflow-98869/authentication/settings\n' +
+          '2. Em "Authorized domains", clique "Add domain"\n' +
+          '3. Adicione: ' + currentDomain + '\n' +
+          '4. Salve e recarregue esta página.\n\n' +
+          'Enquanto isso, você pode usar o botão "Continuar sem login".'
+        );
+      }
     });
 
     auth.onAuthStateChanged(user => {
@@ -351,28 +364,15 @@ function processRecurringTransactions() {
 
 function loginWithGoogle() {
   if (typeof firebase === 'undefined' || !auth) {
-    showToast('Firebase não disponível. Ativando Modo Convidado...', 'warning');
+    showToast('Firebase não disponível. Ativando Modo Local...', 'warning');
     useGuestMode();
     return;
   }
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
 
-  auth.signInWithPopup(provider)
-    .then(result => {
-      showToast(`Bem-vindo(a), ${result.user.displayName || 'Usuário'}! 👋`, 'success');
-    })
-    .catch(err => {
-      console.error('Erro no Login Google:', err);
-      if (err.code === 'auth/popup-blocked' || err.code === 'auth/popup-closed-by-user') {
-        showToast('Tentando login por redirecionamento...', 'info');
-        auth.signInWithRedirect(provider);
-      } else if (err.code === 'auth/unauthorized-domain') {
-        alert('⚠️ Domínio não autorizado no Firebase Console.\n\nPara resolver:\n1. Acesse o Firebase Console (projectId: financeflow-98869)\n2. Vá em Authentication > Settings > Authorized domains\n3. Adicione o domínio atual.\n\nVocê também pode usar o botão "Continuar sem login (Modo Local)".');
-      } else {
-        alert('⚠️ Não foi possível realizar o login com o Google.\nMotivo: ' + (err.message || err.code) + '\n\nVocê pode continuar usando o app no Modo Local (offline).');
-      }
-    });
+  // signInWithRedirect é mais confiável em PWAs, mobile e domínios como Vercel
+  auth.signInWithRedirect(provider);
 }
 
 function useGuestMode() {
