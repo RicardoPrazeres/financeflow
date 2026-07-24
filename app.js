@@ -603,7 +603,6 @@ function setupEventListeners() {
     hamburgerBtn:   () => document.getElementById('hamburgerBtn').addEventListener('click', toggleSidebar),
     sidebarOverlay: () => document.getElementById('sidebarOverlay').addEventListener('click', closeSidebar),
     alertBell:      () => document.getElementById('alertBell').addEventListener('click', toggleAlerts),
-    dashPeriod:     () => document.getElementById('dashPeriod').addEventListener('input', renderDashboard),
   };
 
   for (const [id, setup] of Object.entries(ids)) {
@@ -611,15 +610,87 @@ function setupEventListeners() {
     if (el) setup();
   }
 
-  ['filterMonth','filterType','filterCategory','filterSearch'].forEach(id => {
+  setupPeriodFilter('dash', renderDashboard);
+  setupPeriodFilter('transactions', renderTransactions);
+  setupPeriodFilter('cards', renderCards);
+
+  ['filterType','filterCategory','filterSearch'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', renderTransactions);
   });
-  
-  const filterMonthCards = document.getElementById('filterMonthCards');
-  if (filterMonthCards) {
-    filterMonthCards.addEventListener('input', renderCards);
-  }
+}
+
+const PERIOD_FILTER_IDS = {
+  dash: { mode:'dashPeriodMode', day:'dashDate', month:'dashMonth', year:'dashYear' },
+  transactions: { mode:'transactionsPeriodMode', day:'transactionsDate', month:'transactionsMonth', year:'transactionsYear' },
+  cards: { mode:'cardsPeriodMode', day:'cardsDate', month:'cardsMonth', year:'cardsYear' },
+};
+
+function populatePeriodYears() {
+  const currentYear = new Date().getFullYear();
+  const years = new Set();
+  for (let year = currentYear - 8; year <= currentYear + 1; year++) years.add(year);
+  transactions.forEach(t => {
+    const year = Number(t.date?.slice(0, 4));
+    if (year) years.add(year);
+  });
+
+  const options = [...years].sort((a,b) => b-a).map(year => `<option value="${year}">${year}</option>`).join('');
+  Object.values(PERIOD_FILTER_IDS).forEach(ids => {
+    const select = document.getElementById(ids.year);
+    if (select) select.innerHTML = options;
+  });
+}
+
+function syncPeriodFilter(prefix) {
+  const ids = PERIOD_FILTER_IDS[prefix];
+  if (!ids) return;
+  const mode = document.getElementById(ids.mode)?.value || 'month';
+  ['day','month','year'].forEach(type => {
+    const input = document.getElementById(ids[type]);
+    if (input) input.hidden = type !== mode;
+  });
+}
+
+function setupPeriodFilter(prefix, callback) {
+  const ids = PERIOD_FILTER_IDS[prefix];
+  if (!ids) return;
+  const mode = document.getElementById(ids.mode);
+  mode?.addEventListener('change', () => {
+    syncPeriodFilter(prefix);
+    callback();
+  });
+  ['day','month','year'].forEach(type => {
+    document.getElementById(ids[type])?.addEventListener('input', callback);
+  });
+  syncPeriodFilter(prefix);
+}
+
+function getPeriodSelection(prefix) {
+  const ids = PERIOD_FILTER_IDS[prefix];
+  if (!ids) return { mode:'month', value:getCurrentMonthStr() };
+  const mode = document.getElementById(ids.mode)?.value || 'month';
+  const fallback = mode === 'day' ? getTodayStr() : mode === 'year' ? String(new Date().getFullYear()) : getCurrentMonthStr();
+  return { mode, value: document.getElementById(ids[mode])?.value || fallback };
+}
+
+function matchesPeriod(date, prefix) {
+  if (!date) return false;
+  const { mode, value } = getPeriodSelection(prefix);
+  if (mode === 'day') return date === value;
+  return date.startsWith(value);
+}
+
+function getPeriodMonth(prefix) {
+  const { mode, value } = getPeriodSelection(prefix);
+  if (mode === 'day') return value.slice(0, 7);
+  if (mode === 'month') return value;
+  return `${value}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getPeriodNoun(prefix) {
+  const mode = getPeriodSelection(prefix).mode;
+  return mode === 'day' ? 'Dia' : mode === 'year' ? 'Ano' : 'Mês';
 }
 
 // ── SIDEBAR ──────────────────────────────────────
@@ -1242,9 +1313,7 @@ function renderDashboard() {
 }
 
 function getPeriodTransactions() {
-  const period = document.getElementById('dashPeriod').value;
-  if (!period) return transactions;
-  return transactions.filter(t => t.date?.startsWith(period));
+  return transactions.filter(t => matchesPeriod(t.date, 'dash'));
 }
 
 function renderDashboardKPIs() {
@@ -1269,14 +1338,18 @@ function renderDashboardKPIs() {
 }
 
 function renderMonthlyChart() {
-  const period = document.getElementById('dashPeriod').value || new Date().toISOString().slice(0,7);
-  const [py, pm] = period.split('-').map(Number);
+  const selection = getPeriodSelection('dash');
+  const anchorMonth = getPeriodMonth('dash');
+  const [py, pm] = anchorMonth.split('-').map(Number);
   const selectedDate = new Date(py, pm - 1, 1);
   const months = [];
   const incomes = [], expenses = [];
 
-  for (let i=5; i>=0; i--) {
-    const d = new Date(selectedDate.getFullYear(), selectedDate.getMonth()-i, 1);
+  const points = selection.mode === 'year' ? 12 : 6;
+  for (let i=points-1; i>=0; i--) {
+    const d = selection.mode === 'year'
+      ? new Date(Number(selection.value), points - 1 - i, 1)
+      : new Date(selectedDate.getFullYear(), selectedDate.getMonth()-i, 1);
     const m = d.toISOString().slice(0,7);
     months.push(d.toLocaleString('pt-BR', { month:'short' }));
     const mTxs = transactions.filter(t => t.date?.startsWith(m));
@@ -1300,8 +1373,7 @@ function renderMonthlyChart() {
 }
 
 function renderCategoryChart() {
-  const month = document.getElementById('dashPeriod').value || new Date().toISOString().slice(0,7);
-  const exp = transactions.filter(t => t.type==='expense' && t.date?.startsWith(month));
+  const exp = getPeriodTransactions().filter(t => t.type==='expense');
   const catTotals = {};
   exp.forEach(t => { catTotals[t.cat] = (catTotals[t.cat]||0) + t.amount; });
 
@@ -1332,8 +1404,15 @@ function renderCategoryChart() {
 }
 
 function renderBudgetOverview() {
-  const month = document.getElementById('dashPeriod').value || new Date().toISOString().slice(0,7);
   const el = document.getElementById('budgetBars');
+  const selection = getPeriodSelection('dash');
+  const month = getPeriodMonth('dash');
+
+  if (selection.mode === 'year') {
+    el.innerHTML = '<p class="context-message">Os orçamentos são mensais. Selecione “Mês” ou “Dia” para acompanhar os limites.</p>';
+    document.getElementById('budgetOverviewCard').style.display = 'block';
+    return;
+  }
   const active = budgets.filter(b => b.month === month);
 
   if (active.length === 0) {
@@ -1366,13 +1445,12 @@ function renderRecentTransactions() {
 
 // ── TRANSACTIONS ─────────────────────────────────
 function renderTransactions() {
-  const month  = document.getElementById('filterMonth').value;
   const type   = document.getElementById('filterType').value;
   const cat    = document.getElementById('filterCategory').value;
   const search = document.getElementById('filterSearch').value.toLowerCase();
 
   let list = [...transactions].sort((a,b)=>new Date(b.date)-new Date(a.date));
-  if (month)  list = list.filter(t => t.date?.startsWith(month));
+  list = list.filter(t => matchesPeriod(t.date, 'transactions'));
   if (type)   list = list.filter(t => t.type === type);
   if (cat)    list = list.filter(t => t.cat === cat);
   if (search) list = list.filter(t => t.desc.toLowerCase().includes(search) || t.notes?.toLowerCase().includes(search));
@@ -2102,17 +2180,25 @@ function setDefaultDate() {
   document.getElementById('fDate').value = new Date().toISOString().slice(0,10);
 }
 function setDefaultFilterMonth() {
-  const m = new Date().toISOString().slice(0,7);
-  const filterMonth = document.getElementById('filterMonth');
-  if (filterMonth) filterMonth.value = m;
-  const filterMonthCards = document.getElementById('filterMonthCards');
-  if (filterMonthCards) filterMonthCards.value = m;
-  const dashPeriod = document.getElementById('dashPeriod');
-  if (dashPeriod) dashPeriod.value = m;
+  const today = getTodayStr();
+  const month = getCurrentMonthStr();
+  const year = today.slice(0, 4);
+  populatePeriodYears();
+  Object.entries(PERIOD_FILTER_IDS).forEach(([prefix, ids]) => {
+    const dayInput = document.getElementById(ids.day);
+    const monthInput = document.getElementById(ids.month);
+    const yearInput = document.getElementById(ids.year);
+    if (dayInput) dayInput.value = today;
+    if (monthInput) monthInput.value = month;
+    if (yearInput) yearInput.value = year;
+    syncPeriodFilter(prefix);
+  });
 }
 
 function renderCards() {
-  const month = document.getElementById('filterMonthCards').value;
+  const selection = getPeriodSelection('cards');
+  const periodValue = selection.value;
+  const periodNoun = getPeriodNoun('cards');
   const el = document.getElementById('cardsGrid');
   if (!el) return;
 
@@ -2128,19 +2214,22 @@ function renderCards() {
       return (t.payment === 'credito' && c.id === 'outro');
     };
 
-    // Gasto no mês = soma das parcelas com vencimento neste mês
-    const monthlyAmount = transactions
-      .filter(t => isThisCard(t) && t.date?.startsWith(month))
+    // Gasto no período selecionado
+    const periodAmount = transactions
+      .filter(t => isThisCard(t) && matchesPeriod(t.date, 'cards'))
       .reduce((sum, t) => sum + t.amount, 0);
 
-    // Total acumulado = soma de todas as parcelas já lançadas
-    const totalAmount = transactions
-      .filter(t => isThisCard(t) && t.date?.slice(0,7) <= month)
+    // O limite sempre considera a fatura mensal correspondente ao período.
+    const limitMonth = selection.mode === 'day'
+      ? periodValue.slice(0, 7)
+      : selection.mode === 'month' ? periodValue : getCurrentMonthStr();
+    const invoiceAmount = transactions
+      .filter(t => isThisCard(t) && t.date?.startsWith(limitMonth))
       .reduce((sum, t) => sum + t.amount, 0);
 
-    // Parcelas futuras (após o mês selecionado)
+    // Parcelas futuras após a fatura usada no cálculo do limite.
     const futureTxs = transactions.filter(t =>
-      isThisCard(t) && t.installmentGroupId && t.date?.slice(0,7) > month
+      isThisCard(t) && t.installmentGroupId && t.date?.slice(0,7) > limitMonth
     );
     const pendingTotal = futureTxs.reduce((s, t) => s + t.amount, 0);
     const pendingCount = futureTxs.length;
@@ -2151,7 +2240,7 @@ function renderCards() {
             <span class="cc-val-pending" style="color:#f59e0b">R$ ${fmt(pendingTotal)} (${pendingCount}x)</span>
           </div>` : '';
 
-    const limitSpent = monthlyAmount + pendingTotal;
+    const limitSpent = invoiceAmount + pendingTotal;
     const limitPct = Math.min(100, (limitSpent / c.limit) * 100);
 
     const safeName = escapeHTML(c.name);
@@ -2168,12 +2257,12 @@ function renderCards() {
             <span>💳 Vencimento: <strong>${c.dueDay ? 'Dia ' + c.dueDay : 'Não def.'}</strong></span>
           </div>
           <div class="cc-stat-row">
-            <span class="cc-stat-label">Gasto no Mês</span>
-            <span class="cc-val-monthly">R$ ${fmt(monthlyAmount)}</span>
+            <span class="cc-stat-label">Gasto no ${periodNoun}</span>
+            <span class="cc-val-monthly">R$ ${fmt(periodAmount)}</span>
           </div>
           ${pendingHtml}
           <div class="cc-stat-row">
-            <span class="cc-stat-label">Limite Disponível</span>
+            <span class="cc-stat-label">Limite Disponível${selection.mode === 'year' ? ' (atual)' : ''}</span>
             <span class="cc-val-total" style="color: ${limitSpent >= c.limit ? 'var(--red)' : 'var(--green)'}">R$ ${fmt(Math.max(0, c.limit - limitSpent))} / R$ ${fmt(c.limit)}</span>
           </div>
           <div class="cc-stat-row">
