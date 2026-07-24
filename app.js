@@ -646,6 +646,12 @@ function syncPeriodFilter(prefix) {
   const ids = PERIOD_FILTER_IDS[prefix];
   if (!ids) return;
   const mode = document.getElementById(ids.mode)?.value || 'month';
+  const container = document.querySelector(`[data-period-filter="${prefix}"]`);
+  container?.querySelectorAll('[data-period-mode]').forEach(button => {
+    const isActive = button.dataset.periodMode === mode;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+  });
   ['day','month','year'].forEach(type => {
     const input = document.getElementById(ids[type]);
     if (input) input.hidden = type !== mode;
@@ -656,9 +662,14 @@ function setupPeriodFilter(prefix, callback) {
   const ids = PERIOD_FILTER_IDS[prefix];
   if (!ids) return;
   const mode = document.getElementById(ids.mode);
-  mode?.addEventListener('change', () => {
-    syncPeriodFilter(prefix);
-    callback();
+  const container = document.querySelector(`[data-period-filter="${prefix}"]`);
+  container?.querySelectorAll('[data-period-mode]').forEach(button => {
+    button.addEventListener('click', () => {
+      if (!mode || mode.value === button.dataset.periodMode) return;
+      mode.value = button.dataset.periodMode;
+      syncPeriodFilter(prefix);
+      callback();
+    });
   });
   ['day','month','year'].forEach(type => {
     document.getElementById(ids[type])?.addEventListener('input', callback);

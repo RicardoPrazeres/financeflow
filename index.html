@@ -382,16 +382,17 @@
             <h1 class="section-title">Dashboard</h1>
           </div>
           <div class="period-filter" data-period-filter="dash">
-            <label class="period-control period-mode-control">
-              <span>Visualizar por</span>
-              <select id="dashPeriodMode" class="filter-input" aria-label="Período do dashboard">
-                <option value="day">Dia</option>
-                <option value="month" selected>Mês</option>
-                <option value="year">Ano</option>
-              </select>
-            </label>
+            <div class="period-mode-control">
+              <span class="period-label">Visualizar por</span>
+              <div class="period-tabs" role="group" aria-label="Período do dashboard">
+                <button type="button" data-period-mode="day" aria-pressed="false">Dia</button>
+                <button type="button" data-period-mode="month" aria-pressed="true">Mês</button>
+                <button type="button" data-period-mode="year" aria-pressed="false">Ano</button>
+              </div>
+              <input type="hidden" id="dashPeriodMode" value="month">
+            </div>
             <label class="period-control">
-              <span>Período</span>
+              <span>Data selecionada</span>
               <input type="date" id="dashDate" class="filter-input period-value" data-mode="day" aria-label="Dia do dashboard">
               <input type="month" id="dashMonth" class="filter-input period-value" data-mode="month" aria-label="Mês do dashboard">
               <select id="dashYear" class="filter-input period-value" data-mode="year" aria-label="Ano do dashboard"></select>
@@ -472,16 +473,17 @@
         <!-- FILTERS -->
         <div class="filter-panel">
           <div class="period-filter period-filter-inline" data-period-filter="transactions">
-            <label class="period-control period-mode-control">
-              <span>Visualizar por</span>
-              <select id="transactionsPeriodMode" class="filter-input" aria-label="Período das transações">
-                <option value="day">Dia</option>
-                <option value="month" selected>Mês</option>
-                <option value="year">Ano</option>
-              </select>
-            </label>
+            <div class="period-mode-control">
+              <span class="period-label">Visualizar por</span>
+              <div class="period-tabs" role="group" aria-label="Período das transações">
+                <button type="button" data-period-mode="day" aria-pressed="false">Dia</button>
+                <button type="button" data-period-mode="month" aria-pressed="true">Mês</button>
+                <button type="button" data-period-mode="year" aria-pressed="false">Ano</button>
+              </div>
+              <input type="hidden" id="transactionsPeriodMode" value="month">
+            </div>
             <label class="period-control">
-              <span>Período</span>
+              <span>Data selecionada</span>
               <input type="date" id="transactionsDate" class="filter-input period-value" data-mode="day" aria-label="Dia das transações">
               <input type="month" id="transactionsMonth" class="filter-input period-value" data-mode="month" aria-label="Mês das transações">
               <select id="transactionsYear" class="filter-input period-value" data-mode="year" aria-label="Ano das transações"></select>
@@ -540,16 +542,17 @@
             <h1 class="section-title">Cartões</h1>
           </div>
           <div class="period-filter" data-period-filter="cards">
-            <label class="period-control period-mode-control">
-              <span>Visualizar por</span>
-              <select id="cardsPeriodMode" class="filter-input" aria-label="Período dos cartões">
-                <option value="day">Dia</option>
-                <option value="month" selected>Mês</option>
-                <option value="year">Ano</option>
-              </select>
-            </label>
+            <div class="period-mode-control">
+              <span class="period-label">Visualizar por</span>
+              <div class="period-tabs" role="group" aria-label="Período dos cartões">
+                <button type="button" data-period-mode="day" aria-pressed="false">Dia</button>
+                <button type="button" data-period-mode="month" aria-pressed="true">Mês</button>
+                <button type="button" data-period-mode="year" aria-pressed="false">Ano</button>
+              </div>
+              <input type="hidden" id="cardsPeriodMode" value="month">
+            </div>
             <label class="period-control">
-              <span>Período</span>
+              <span>Data selecionada</span>
               <input type="date" id="cardsDate" class="filter-input period-value" data-mode="day" aria-label="Dia dos cartões">
               <input type="month" id="cardsMonth" class="filter-input period-value" data-mode="month" aria-label="Mês dos cartões">
               <select id="cardsYear" class="filter-input period-value" data-mode="year" aria-label="Ano dos cartões"></select>

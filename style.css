@@ -47,7 +47,7 @@ body::before,body::after{
   position:fixed;
   border-radius:50%;
   filter:blur(80px);
-  opacity:.025;
+  opacity:0;
   pointer-events:none;
   z-index:0;
 }
@@ -168,8 +168,8 @@ body::after{
 }
 
 .balance-widget{
-  background:linear-gradient(135deg,rgba(99,102,241,.2),rgba(168,85,247,.2));
-  border:1px solid rgba(99,102,241,.25);
+  background:var(--surface2);
+  border:1px solid var(--border);
   border-radius:12px;
   padding:14px 16px;
 }
@@ -181,6 +181,7 @@ body::after{
 #main{
   margin-left:var(--sidebar-w);
   flex:1;
+  min-width:0;
   min-height:100vh;
   display:flex;flex-direction:column;
   position:relative;
@@ -211,9 +212,9 @@ body::after{
 .topbar-right{display:flex;align-items:center;gap:12px;}
 
 .btn-scan{
-  background: linear-gradient(135deg, #f59e0b, #f97316);
-  color: #fff;
-  border: none;
+  background:var(--surface2);
+  color:var(--text2);
+  border:1px solid var(--border);
   border-radius: 10px;
   padding: 8px 14px;
   font-size: 13px;
@@ -222,10 +223,10 @@ body::after{
   display: flex;
   align-items: center;
   gap: 6px;
-  transition: opacity .2s, transform .1s;
-  box-shadow: 0 4px 16px rgba(249,115,22,0.35);
+  transition:background .15s,color .15s,border-color .15s;
+  box-shadow:none;
 }
-.btn-scan:hover{opacity:.9; transform:scale(1.02);}
+.btn-scan:hover{background:var(--surface3);color:var(--text);border-color:var(--border2);}
 
 .hamburger{
   display:none;
@@ -285,9 +286,9 @@ body::after{
 }
 
 /* ══════════════════════ CONTENT ══════════════════════ */
-#content{padding:32px;flex:1;width:100%;max-width:1540px;margin:0 auto;}
+#content{padding:32px;flex:1;width:100%;max-width:1540px;min-width:0;margin:0 auto;}
 
-.section{display:none;}
+.section{display:none;min-width:0;}
 .section.active{
   display:block;
   animation: fadeInUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -333,6 +334,7 @@ body::after{
   grid-template-columns:repeat(4,1fr);
   gap:16px;
   margin-bottom:24px;
+  min-width:0;
 }
 
 .kpi-card{
@@ -346,6 +348,7 @@ body::after{
   overflow:hidden;
   transition:border-color .2s ease,box-shadow .2s ease;
   cursor:default;
+  min-width:0;
 }
 
 .kpi-card::before{
@@ -390,6 +393,7 @@ body::after{
   grid-template-columns:1fr 340px;
   gap:16px;
   margin-bottom:24px;
+  min-width:0;
 }
 
 .chart-card{
@@ -401,6 +405,8 @@ body::after{
   padding:20px;
   box-shadow:none;
   transition:border-color .2s ease,box-shadow .2s ease;
+  min-width:0;
+  overflow:hidden;
 }
 .chart-card:hover {
   border-color:var(--border2);
@@ -416,7 +422,8 @@ body::after{
 }
 .chart-title span{font-size:11px;color:var(--text2);font-weight:400;}
 
-.chart-wrap{position:relative;height:240px;}
+.chart-wrap{position:relative;height:240px;min-width:0;overflow:hidden;}
+.chart-wrap canvas{display:block;max-width:100%!important;}
 .donut-wrap{height:200px;}
 
 .chart-legend{margin-top:12px;display:flex;flex-direction:column;gap:6px;}
@@ -754,16 +761,16 @@ body::after{
 .period-filter{
   display:flex;
   align-items:flex-end;
-  gap:8px;
-  padding:7px;
+  gap:10px;
+  padding:8px;
   background:var(--surface);
   border:1px solid var(--border);
   border-radius:12px;
-  box-shadow:0 8px 22px rgba(0,0,0,.12);
+  box-shadow:none;
 }
-.period-control{display:flex;flex-direction:column;gap:5px;min-width:138px;}
-.period-mode-control{min-width:116px;}
-.period-control>span{
+.period-control,.period-mode-control{display:flex;flex-direction:column;gap:5px;min-width:174px;}
+.period-mode-control{min-width:164px;}
+.period-control>span,.period-label{
   padding-left:3px;
   color:var(--text3);
   font-size:9px;
@@ -771,12 +778,39 @@ body::after{
   letter-spacing:.8px;
   text-transform:uppercase;
 }
-.period-filter .filter-input{min-width:0;width:100%;border-color:transparent;background:var(--surface2);}
+.period-tabs{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:3px;
+  padding:3px;
+  min-height:40px;
+  background:var(--surface2);
+  border:1px solid var(--border);
+  border-radius:9px;
+}
+.period-tabs button{
+  min-width:0;
+  padding:6px 10px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--text2);
+  font:600 12px 'Inter',sans-serif;
+  cursor:pointer;
+  transition:background .15s,color .15s,box-shadow .15s;
+}
+.period-tabs button:hover{color:var(--text);background:rgba(255,255,255,.035);}
+.period-tabs button.active{
+  color:#fff;
+  background:var(--accent);
+  box-shadow:0 3px 10px var(--accent-glow);
+}
+.period-filter .filter-input{min-width:0;width:100%;border-color:var(--border);background:var(--surface2);}
 .period-value[hidden]{display:none;}
 
 .filter-panel{
   display:grid;
-  grid-template-columns:auto minmax(360px,1fr) auto;
+  grid-template-columns:auto minmax(280px,1fr);
   align-items:end;
   gap:12px;
   margin-bottom:16px;
@@ -791,7 +825,14 @@ body::after{
 .search-field{position:relative;display:flex;align-items:center;flex:1;min-width:180px;}
 .search-field>span{position:absolute;left:12px;color:var(--text3);font-size:18px;pointer-events:none;}
 .search-field .filter-input{width:100%;padding-left:34px;}
-.filter-actions{display:flex;gap:8px;justify-content:flex-end;}
+.filter-actions{
+  display:flex;
+  grid-column:1/-1;
+  gap:8px;
+  justify-content:flex-end;
+  padding-top:12px;
+  border-top:1px solid var(--border);
+}
 .context-message{color:var(--text2);font-size:13px;padding:6px 0;}
 
 /* ══════════════════════ BTNS ══════════════════════ */
@@ -1046,6 +1087,7 @@ tr:hover td{background:var(--surface2);}
   .filters-secondary{flex-direction:row;flex-wrap:wrap;}
   .filters-secondary .filter-input{min-width:180px;}
   .filter-actions{justify-content:flex-start;flex-wrap:wrap;}
+  .chart-card{width:100%;max-width:100%;}
 }
 
 @media(max-width:480px){
@@ -1070,7 +1112,7 @@ tr:hover td{background:var(--surface2);}
   .card-form-actions .btn{width:100%;justify-content:center;}
   #loginOverlay{padding:24px max(20px,env(safe-area-inset-left));}
   .section-header{align-items:stretch;margin-bottom:18px;}
-  .period-filter{width:100%;display:grid;grid-template-columns:108px minmax(0,1fr);}
+  .period-filter{width:100%;display:grid;grid-template-columns:1fr;}
   .period-control,.period-mode-control{min-width:0;}
   .filter-panel{padding:12px;}
   .filters-secondary{flex-direction:column;}
