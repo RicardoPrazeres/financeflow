@@ -252,6 +252,8 @@ let categories = [];
 let goals = [];
 let editingId = null;
 let editingGoalId = null;
+let editingCardId = null;
+let loginInProgress = false;
 let currentType = 'expense';
 let chartMonthly = null, chartCategory = null, chartAnnual = null, chartTopCat = null, chartTrend = null;
 
@@ -262,31 +264,23 @@ let selectedIds = new Set();
 // ── INIT ─────────────────────────────────────────
 function init() {
   if (auth) {
+    auth.useDeviceLanguage();
     auth.getRedirectResult().then(result => {
       if (result && result.user) {
         localStorage.removeItem('ff_guest_mode');
+        setLoginState('Login concluído. Carregando seus dados...', 'success');
         showToast(`Login realizado! Bem-vindo(a) ${result.user.displayName || ''} 👋`, 'success');
       }
     }).catch(err => {
       console.error('Erro no resultado do redirecionamento:', err);
-      const currentDomain = window.location.hostname;
-      if (err.code === 'auth/unauthorized-domain') {
-        alert(
-          '⚠️ Login com Google bloqueado!\n\n' +
-          'O domínio "' + currentDomain + '" não está autorizado no Firebase.\n\n' +
-          'Para resolver:\n' +
-          '1. Acesse: https://console.firebase.google.com/project/financeflow-98869/authentication/settings\n' +
-          '2. Em "Authorized domains", clique "Add domain"\n' +
-          '3. Adicione: ' + currentDomain + '\n' +
-          '4. Salve e recarregue esta página.\n\n' +
-          'Enquanto isso, você pode usar o botão "Continuar sem login".'
-        );
-      }
+      handleLoginError(err);
     });
 
     auth.onAuthStateChanged(user => {
       if (user) {
         localStorage.removeItem('ff_guest_mode');
+        loginInProgress = false;
+        setLoginState('', 'success');
         currentUser = user;
         document.getElementById('loginOverlay').style.display = 'none';
         loadDataFromFirebase();
@@ -369,21 +363,67 @@ function processRecurringTransactions() {
   }
 }
 
-function loginWithGoogle() {
+function setLoginState(message = '', type = 'info', busy = false) {
+  const button = document.getElementById('googleLoginBtn');
+  const label = document.getElementById('googleLoginButtonLabel');
+  const status = document.getElementById('loginStatus');
+
+  if (button) button.disabled = busy;
+  if (label) label.textContent = busy ? 'Abrindo o Google...' : 'Entrar com Google';
+  if (status) {
+    status.textContent = message;
+    status.className = `login-status ${message ? 'show' : ''} ${type}`;
+  }
+}
+
+function handleLoginError(err) {
+  const code = err?.code || '';
+  const messages = {
+    'auth/popup-blocked': 'O navegador bloqueou a janela do Google. Permita pop-ups para este site e tente novamente.',
+    'auth/popup-closed-by-user': 'A entrada foi cancelada antes de concluir. Toque em “Entrar com Google” para tentar novamente.',
+    'auth/cancelled-popup-request': 'Já existe uma tentativa de entrada em andamento.',
+    'auth/network-request-failed': 'Não foi possível conectar ao Google. Verifique a internet e tente novamente.',
+    'auth/web-storage-unsupported': 'O navegador está bloqueando o armazenamento necessário. Abra o site no Safari ou Chrome fora do modo privado.',
+    'auth/unauthorized-domain': `O domínio ${window.location.hostname} precisa ser autorizado no Firebase. Enquanto isso, use o modo local.`,
+    'auth/operation-not-supported-in-this-environment': 'Este navegador não permite a entrada do Google. Abra o site diretamente no Safari ou Chrome.',
+  };
+  const message = messages[code] || 'Não foi possível entrar com o Google. Tente novamente ou use o modo local.';
+
+  loginInProgress = false;
+  setLoginState(message, 'error', false);
+  showToast(message, 'error');
+}
+
+async function loginWithGoogle() {
+  if (loginInProgress) return;
   localStorage.removeItem('ff_guest_mode');
   if (typeof firebase === 'undefined' || !auth) {
-    showToast('Firebase não disponível. Ativando Modo Local...', 'warning');
-    useGuestMode();
+    handleLoginError({ code: 'auth/operation-not-supported-in-this-environment' });
     return;
   }
+
   const provider = new firebase.auth.GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
 
-  auth.signInWithRedirect(provider);
+  loginInProgress = true;
+  setLoginState('Uma janela segura do Google será aberta para você escolher a conta.', 'info', true);
+
+  try {
+    const result = await auth.signInWithPopup(provider);
+    if (result?.user) {
+      localStorage.removeItem('ff_guest_mode');
+      setLoginState('Login concluído. Carregando seus dados...', 'success', true);
+    }
+  } catch (err) {
+    console.error('Erro no login Google:', err);
+    handleLoginError(err);
+  }
 }
 
 function useGuestMode() {
   localStorage.setItem('ff_guest_mode', 'true');
+  loginInProgress = false;
+  setLoginState('', 'info', false);
   currentUser = null;
   loadData();
   finishInit();
@@ -617,10 +657,11 @@ function buildCardSelector() {
   const el = document.getElementById('cardSelector');
   if (!el) return;
   el.innerHTML = customCards.map((c, index) => {
-    const initials = c.initials || c.name.slice(0, 2).toUpperCase();
+    const initials = escapeHTML(c.initials || c.name.slice(0, 2).toUpperCase());
+    const name = escapeHTML(c.name);
     return `<div class="card-chip ${index === 0 ? 'selected' : ''}" data-card="${c.id}" onclick="selectCard('${c.id}')">
       <div class="chip-logo" style="background:${c.color}">${initials}</div>
-      ${c.name}
+      ${name}
     </div>`;
   }).join('');
   
@@ -1583,10 +1624,13 @@ function renderSettings() {
     if (customCards.length === 0) {
       elCards.innerHTML = '<p style="color:var(--text2);font-size:13px;margin-bottom:8px">Nenhum cartão cadastrado.</p>';
     } else {
-      elCards.innerHTML = customCards.map(c => `<div class="cat-item">
+      elCards.innerHTML = customCards.map(c => `<div class="cat-item card-settings-item">
         <div class="cat-dot" style="background:${c.color}"></div>
-        <span class="cat-name">${c.name} (${c.initials || 'CC'}) — Limite: R$ ${fmt(c.limit)}${c.closingDay ? ` | Fecha dia ${c.closingDay}` : ''}${c.dueDay ? ` (Vence dia ${c.dueDay})` : ''}</span>
-        <button class="cat-del" onclick="deleteCustomCard('${c.id}')">✕</button>
+        <span class="cat-name"><strong>${escapeHTML(c.name)}</strong> (${escapeHTML(c.initials || 'CC')})<br><span class="card-settings-meta">Limite: R$ ${fmt(c.limit)}${c.closingDay ? ` · Fecha dia ${c.closingDay}` : ''}${c.dueDay ? ` · Vence dia ${c.dueDay}` : ''}</span></span>
+        <div class="cat-actions">
+          <button class="cat-edit" onclick="editCustomCard('${c.id}')" aria-label="Editar cartão ${escapeHTML(c.name)}">✎ Editar</button>
+          <button class="cat-del" onclick="deleteCustomCard('${c.id}')" aria-label="Excluir cartão ${escapeHTML(c.name)}">✕</button>
+        </div>
       </div>`).join('');
     }
   }
@@ -1611,7 +1655,42 @@ function saveGeminiApiKey() {
   }
 }
 
-function addCustomCard() {
+function resetCustomCardForm() {
+  editingCardId = null;
+  document.getElementById('newCardName').value = '';
+  document.getElementById('newCardInitials').value = '';
+  document.getElementById('newCardLimit').value = '';
+  document.getElementById('newCardClosingDay').value = '';
+  document.getElementById('newCardDueDay').value = '';
+  document.getElementById('newCardColor').selectedIndex = 0;
+  document.getElementById('cardFormTitle').textContent = 'Adicionar novo cartão';
+  document.getElementById('saveCardBtn').textContent = 'Adicionar cartão';
+  document.getElementById('cancelCardEditBtn').style.display = 'none';
+}
+
+function editCustomCard(id) {
+  const card = customCards.find(c => c.id === id);
+  if (!card) return;
+
+  editingCardId = id;
+  document.getElementById('newCardName').value = card.name || '';
+  document.getElementById('newCardInitials').value = card.initials || '';
+  document.getElementById('newCardLimit').value = card.limit || '';
+  document.getElementById('newCardClosingDay').value = card.closingDay || '';
+  document.getElementById('newCardDueDay').value = card.dueDay || '';
+  document.getElementById('newCardColor').value = card.color;
+  document.getElementById('cardFormTitle').textContent = `Editando ${card.name}`;
+  document.getElementById('saveCardBtn').textContent = 'Salvar alterações';
+  document.getElementById('cancelCardEditBtn').style.display = '';
+  document.getElementById('newCardName').focus();
+}
+
+function cancelCustomCardEdit() {
+  resetCustomCardForm();
+  showToast('Edição cancelada', 'warning');
+}
+
+function saveCustomCard() {
   const name = document.getElementById('newCardName').value.trim();
   const initials = document.getElementById('newCardInitials').value.trim().toUpperCase();
   const limit = parseAmount(document.getElementById('newCardLimit').value);
@@ -1623,23 +1702,38 @@ function addCustomCard() {
 
   if (!name) { showToast('Informe o nome do cartão', 'error'); return; }
   if (!limit || limit <= 0) { showToast('Informe um limite válido', 'error'); return; }
+  if (closingDay && (closingDay < 1 || closingDay > 31)) { showToast('O fechamento deve ser entre os dias 1 e 31', 'error'); return; }
+  if (dueDay && (dueDay < 1 || dueDay > 31)) { showToast('O vencimento deve ser entre os dias 1 e 31', 'error'); return; }
+  if (customCards.some(c => c.id !== editingCardId && c.name.toLowerCase() === name.toLowerCase())) {
+    showToast('Já existe um cartão com esse nome', 'error');
+    return;
+  }
 
-  const id = 'card_' + Date.now();
-  customCards.push({ id, name, initials: initials || name.slice(0,2).toUpperCase(), color, limit, closingDay, dueDay });
+  const cardData = { name, initials: initials || name.slice(0,2).toUpperCase(), color, limit, closingDay, dueDay };
+  const wasEditing = Boolean(editingCardId);
+
+  if (wasEditing) {
+    const index = customCards.findIndex(c => c.id === editingCardId);
+    if (index === -1) { resetCustomCardForm(); return; }
+    customCards[index] = { ...customCards[index], ...cardData };
+    transactions.forEach(t => {
+      if (t.cardKey === editingCardId) t.cardLabel = name;
+    });
+  } else {
+    customCards.push({ id: 'card_' + Date.now(), ...cardData });
+  }
+
   saveData();
+  resetCustomCardForm();
   buildCardSelector();
   renderSettings();
-
-  document.getElementById('newCardName').value = '';
-  document.getElementById('newCardInitials').value = '';
-  document.getElementById('newCardLimit').value = '';
-  if (closingDayEl) closingDayEl.value = '';
-  if (dueDayEl) dueDayEl.value = '';
-  showToast('Cartão adicionado ✓', 'success');
+  renderCards();
+  showToast(wasEditing ? 'Cartão atualizado ✓' : 'Cartão adicionado ✓', 'success');
 }
 
 function deleteCustomCard(id) {
   if (!confirm('Excluir este cartão?')) return;
+  if (editingCardId === id) resetCustomCardForm();
   customCards = customCards.filter(c => c.id !== id);
   saveData();
   buildCardSelector();
@@ -2060,11 +2154,13 @@ function renderCards() {
     const limitSpent = monthlyAmount + pendingTotal;
     const limitPct = Math.min(100, (limitSpent / c.limit) * 100);
 
+    const safeName = escapeHTML(c.name);
+    const safeInitials = escapeHTML(c.initials || c.name.slice(0, 2).toUpperCase());
     return `
       <div class="cc-widget animate-fade-in" style="--chip-bg: ${c.color}; border-top-color: ${c.color.replace('linear-gradient(135deg,', '').split(',')[0]}33;">
         <div class="cc-header">
-          <h3>${c.name}</h3>
-          <div class="cc-brand-icon" style="background: ${c.color}">${c.initials}</div>
+          <h3>${safeName}</h3>
+          <div class="cc-brand-icon" style="background: ${c.color}">${safeInitials}</div>
         </div>
         <div class="cc-stats">
           <div class="cc-stat-row" style="font-size:12px;color:var(--text-muted);margin-top:2px;">
