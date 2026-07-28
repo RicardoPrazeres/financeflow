@@ -250,9 +250,12 @@ let transactions = [];
 let budgets = [];
 let categories = [];
 let goals = [];
+let fixedExpenses = [];
+let cardInvoiceAdjustments = [];
 let editingId = null;
 let editingGoalId = null;
 let editingCardId = null;
+let editingFixedExpenseId = null;
 let loginInProgress = false;
 let currentType = 'expense';
 let chartMonthly = null, chartCategory = null, chartAnnual = null, chartTopCat = null, chartTrend = null;
@@ -309,6 +312,7 @@ function finishInit() {
   setupEventListeners();
   setupDragAndDrop();
   processRecurringTransactions();
+  processFixedExpenses();
   navigate('dashboard');
   if (!currentUser) loadDemoDataIfEmpty();
 }
@@ -361,6 +365,93 @@ function processRecurringTransactions() {
     saveData();
     showToast(`${createdCount} despesa(s) recorrente(s) gerada(s) para este mês 🔄`, 'info');
   }
+}
+
+function processFixedExpenses() {
+  if (!fixedExpenses.length) return;
+  const currentMonth = getCurrentMonthStr();
+  let createdCount = 0;
+
+  fixedExpenses.filter(item => item.active !== false).forEach(item => {
+    const startMonth = item.startMonth || currentMonth;
+    if (startMonth > currentMonth) return;
+    const [startYear, startMonthNumber] = startMonth.split('-').map(Number);
+    const [currentYear, currentMonthNumber] = currentMonth.split('-').map(Number);
+    const generatedMonths = new Set(item.generatedMonths || []);
+
+    for (let cursor = new Date(startYear, startMonthNumber - 1, 1);
+      cursor <= new Date(currentYear, currentMonthNumber - 1, 1);
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)) {
+      const month = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+      const alreadyExists = generatedMonths.has(month) || transactions.some(t =>
+        t.fixedExpenseId === item.id && t.fixedExpenseMonth === month
+      );
+      if (alreadyExists) {
+        generatedMonths.add(month);
+        continue;
+      }
+
+      const card = customCards.find(c => c.id === item.cardKey);
+      transactions.push({
+        id: uid(),
+        type: 'expense',
+        desc: item.desc,
+        amount: Number(item.amount) || 0,
+        date: getSafeMonthDate(cursor.getFullYear(), cursor.getMonth(), Number(item.chargeDay) || 1),
+        cat: item.cat || 'other',
+        payment: item.payment || 'outro',
+        notes: 'Gerada automaticamente em Despesas Fixas',
+        recurring: false,
+        fixedExpenseId: item.id,
+        fixedExpenseMonth: month,
+        cardKey: item.payment === 'credito' ? (item.cardKey || null) : null,
+        cardLabel: item.payment === 'credito' ? (card?.name || null) : null,
+        createdAt: new Date().toISOString()
+      });
+      generatedMonths.add(month);
+      createdCount++;
+    }
+    item.generatedMonths = [...generatedMonths];
+  });
+
+  if (createdCount > 0) {
+    saveData();
+    showToast(`${createdCount} cobrança(s) fixa(s) adicionada(s) ✓`, 'success');
+  }
+}
+
+function isTransactionForCard(transaction, cardId) {
+  if (transaction.type !== 'expense') return false;
+  if (transaction.cardKey) return transaction.cardKey === cardId;
+  const payment = String(transaction.payment || '').toLowerCase();
+  return cardId === 'outro' && (payment === 'credito' || payment.includes('crédito') || payment.includes('credito'));
+}
+
+function getCardTransactionsTotal(cardId, month) {
+  return transactions
+    .filter(t => isTransactionForCard(t, cardId) && t.date?.startsWith(month))
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+}
+
+function getCardManualTotal(cardId, month) {
+  return cardInvoiceAdjustments
+    .filter(item => item.cardId === cardId && item.month === month)
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+}
+
+function getCardInvoiceTotal(cardId, month) {
+  return getCardTransactionsTotal(cardId, month) + getCardManualTotal(cardId, month);
+}
+
+function getInvoiceMonthsForPeriod(prefix) {
+  const { mode, value } = getPeriodSelection(prefix);
+  if (mode === 'year') return Array.from({ length: 12 }, (_, index) => `${value}-${String(index + 1).padStart(2, '0')}`);
+  return [mode === 'day' ? value.slice(0, 7) : value];
+}
+
+function getAllCardsInvoiceTotal(prefix) {
+  const months = getInvoiceMonthsForPeriod(prefix);
+  return customCards.reduce((total, card) => total + months.reduce((sum, month) => sum + getCardInvoiceTotal(card.id, month), 0), 0);
 }
 
 function setLoginState(message = '', type = 'info', busy = false) {
@@ -447,6 +538,8 @@ function loadData() {
   categories   = JSON.parse(localStorage.getItem('ff_categories')   || JSON.stringify(DEFAULT_CATEGORIES));
   customCards  = JSON.parse(localStorage.getItem('ff_custom_cards')  || JSON.stringify(DEFAULT_CARDS));
   goals        = JSON.parse(localStorage.getItem('ff_goals')         || '[]');
+  fixedExpenses = JSON.parse(localStorage.getItem('ff_fixed_expenses') || '[]');
+  cardInvoiceAdjustments = JSON.parse(localStorage.getItem('ff_card_invoice_adjustments') || '[]');
 }
 
 let isInitialSync = true;
@@ -460,11 +553,15 @@ function loadDataFromFirebase() {
       categories   = JSON.parse(data.categories   || JSON.stringify(DEFAULT_CATEGORIES));
       customCards  = JSON.parse(data.customCards  || JSON.stringify(DEFAULT_CARDS));
       goals        = JSON.parse(data.goals        || '[]');
+      fixedExpenses = JSON.parse(data.fixedExpenses || '[]');
+      cardInvoiceAdjustments = JSON.parse(data.cardInvoiceAdjustments || '[]');
       localStorage.setItem('ff_transactions', JSON.stringify(transactions));
       localStorage.setItem('ff_budgets',      JSON.stringify(budgets));
       localStorage.setItem('ff_categories',   JSON.stringify(categories));
       localStorage.setItem('ff_custom_cards',  JSON.stringify(customCards));
       localStorage.setItem('ff_goals',         JSON.stringify(goals));
+      localStorage.setItem('ff_fixed_expenses', JSON.stringify(fixedExpenses));
+      localStorage.setItem('ff_card_invoice_adjustments', JSON.stringify(cardInvoiceAdjustments));
     } else {
        if (isInitialSync) {
          loadData(); 
@@ -500,6 +597,8 @@ function saveData() {
   localStorage.setItem('ff_categories',   JSON.stringify(categories));
   localStorage.setItem('ff_custom_cards',  JSON.stringify(customCards));
   localStorage.setItem('ff_goals',         JSON.stringify(goals));
+  localStorage.setItem('ff_fixed_expenses', JSON.stringify(fixedExpenses));
+  localStorage.setItem('ff_card_invoice_adjustments', JSON.stringify(cardInvoiceAdjustments));
   
   if (currentUser && db) {
     db.collection('users').doc(currentUser.uid).set({
@@ -508,6 +607,8 @@ function saveData() {
       categories: JSON.stringify(categories),
       customCards: JSON.stringify(customCards),
       goals: JSON.stringify(goals),
+      fixedExpenses: JSON.stringify(fixedExpenses),
+      cardInvoiceAdjustments: JSON.stringify(cardInvoiceAdjustments),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }).catch(e => {
       console.error("Erro ao salvar nuvem", e);
@@ -562,7 +663,7 @@ function navigate(sec) {
   document.getElementById(`sec-${sec}`).classList.add('active');
   document.querySelector(`[data-section="${sec}"]`)?.classList.add('active');
 
-  const titles = { dashboard:'Dashboard', transactions:'Transações', cards:'Meus Cartões', budgets:'Orçamentos', goals:'Metas', reports:'Relatórios', settings:'Preferências' };
+  const titles = { dashboard:'Dashboard', transactions:'Transações', fixedExpenses:'Despesas Fixas', cards:'Meus Cartões', invoices:'Faturas', budgets:'Orçamentos', goals:'Metas', reports:'Relatórios', settings:'Preferências' };
   document.getElementById('topbarTitle').textContent = titles[sec] || sec;
 
   closeSidebar();
@@ -581,7 +682,9 @@ function navigate(sec) {
 function renderSection(sec) {
   if (sec === 'dashboard')    renderDashboard();
   if (sec === 'transactions') renderTransactions();
+  if (sec === 'fixedExpenses') renderFixedExpenses();
   if (sec === 'cards')        renderCards();
+  if (sec === 'invoices')     renderInvoices();
   if (sec === 'budgets')      renderBudgets();
   if (sec === 'goals')        renderGoals();
   if (sec === 'reports')      renderReports();
@@ -613,6 +716,7 @@ function setupEventListeners() {
   setupPeriodFilter('dash', renderDashboard);
   setupPeriodFilter('transactions', renderTransactions);
   setupPeriodFilter('cards', renderCards);
+  setupPeriodFilter('invoices', renderInvoices);
 
   ['filterType','filterCategory','filterSearch'].forEach(id => {
     const el = document.getElementById(id);
@@ -624,6 +728,7 @@ const PERIOD_FILTER_IDS = {
   dash: { mode:'dashPeriodMode', day:'dashDate', month:'dashMonth', year:'dashYear' },
   transactions: { mode:'transactionsPeriodMode', day:'transactionsDate', month:'transactionsMonth', year:'transactionsYear' },
   cards: { mode:'cardsPeriodMode', day:'cardsDate', month:'cardsMonth', year:'cardsYear' },
+  invoices: { mode:'invoicesPeriodMode', day:'invoicesDate', month:'invoicesMonth', year:'invoicesYear' },
 };
 
 function populatePeriodYears() {
@@ -634,6 +739,8 @@ function populatePeriodYears() {
     const year = Number(t.date?.slice(0, 4));
     if (year) years.add(year);
   });
+  fixedExpenses.forEach(item => { const year = Number(item.startMonth?.slice(0, 4)); if (year) years.add(year); });
+  cardInvoiceAdjustments.forEach(item => { const year = Number(item.month?.slice(0, 4)); if (year) years.add(year); });
 
   const options = [...years].sort((a,b) => b-a).map(year => `<option value="${year}">${year}</option>`).join('');
   Object.values(PERIOD_FILTER_IDS).forEach(ids => {
@@ -720,7 +827,7 @@ function getCat(id) {
 }
 
 function buildCategorySelects() {
-  const selects = ['fCategory','bCategory','filterCategory'];
+  const selects = ['fCategory','bCategory','filterCategory','fixedCategory'];
   selects.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1333,11 +1440,16 @@ function renderDashboardKPIs() {
   const expense = txs.filter(t => t.type === 'expense').reduce((s,t) => s+t.amount, 0);
   const balance = income - expense;
   const savings = income > 0 ? ((income - expense) / income * 100) : 0;
+  const invoiceTotal = getAllCardsInvoiceTotal('dash');
+  const invoiceMode = getPeriodSelection('dash').mode;
 
   document.getElementById('kpiIncome').textContent   = `R$ ${fmt(income)}`;
   document.getElementById('kpiExpense').textContent  = `R$ ${fmt(expense)}`;
   document.getElementById('kpiBalance').textContent  = `R$ ${fmt(balance)}`;
   document.getElementById('kpiSavings').textContent  = `${savings.toFixed(0)}%`;
+  document.getElementById('kpiInvoices').textContent = `R$ ${fmt(invoiceTotal)}`;
+  document.getElementById('kpiInvoicesLabel').textContent = invoiceMode === 'year' ? 'Faturas no ano' : 'Faturas no mês';
+  document.getElementById('kpiInvoicesSub').textContent = 'transações + ajustes manuais';
   document.getElementById('kpiIncomeSub').textContent  = `${txs.filter(t=>t.type==='income').length} transações`;
   document.getElementById('kpiExpenseSub').textContent = `${txs.filter(t=>t.type==='expense').length} transações`;
   document.getElementById('kpiBalance').style.color  = balance >= 0 ? 'var(--green)' : 'var(--red)';
@@ -1824,6 +1936,7 @@ function deleteCustomCard(id) {
   if (!confirm('Excluir este cartão?')) return;
   if (editingCardId === id) resetCustomCardForm();
   customCards = customCards.filter(c => c.id !== id);
+  cardInvoiceAdjustments = cardInvoiceAdjustments.filter(item => item.cardId !== id);
   saveData();
   buildCardSelector();
   renderSettings();
@@ -2111,10 +2224,12 @@ function exportJSON() {
     version: 1,
     exportDate: new Date().toISOString(),
     transactions,
-    customCategories,
+    customCategories: categories,
     customCards,
     goals,
     budgets,
+    fixedExpenses,
+    cardInvoiceAdjustments,
     GEMINI_API_KEY
   };
   const jsonStr = JSON.stringify(data, null, 2);
@@ -2147,16 +2262,20 @@ function handleImportJSON(event) {
 
       if (confirm(`Deseja importar ${data.transactions.length} transações? Seus dados atuais serão sobrescritos.`)) {
         transactions = data.transactions || [];
-        if (data.customCategories) customCategories = data.customCategories;
+        if (Array.isArray(data.customCategories)) categories = data.customCategories;
+        if (Array.isArray(data.categories)) categories = data.categories;
         if (data.customCards) customCards = data.customCards;
         if (data.goals) goals = data.goals;
         if (data.budgets) budgets = data.budgets;
+        if (Array.isArray(data.fixedExpenses)) fixedExpenses = data.fixedExpenses;
+        if (Array.isArray(data.cardInvoiceAdjustments)) cardInvoiceAdjustments = data.cardInvoiceAdjustments;
         if (data.GEMINI_API_KEY) {
           GEMINI_API_KEY = data.GEMINI_API_KEY;
           localStorage.setItem('ff_gemini_api_key', GEMINI_API_KEY);
         }
 
         saveData();
+        processFixedExpenses();
         renderSection(currentSection());
         renderDashboardKPIs();
         showToast('Backup restaurado com sucesso! ✓', 'success');
@@ -2204,12 +2323,201 @@ function setDefaultFilterMonth() {
     if (yearInput) yearInput.value = year;
     syncPeriodFilter(prefix);
   });
+  const fixedStartMonth = document.getElementById('fixedStartMonth');
+  const invoiceEntryMonth = document.getElementById('invoiceEntryMonth');
+  if (fixedStartMonth) fixedStartMonth.value = month;
+  if (invoiceEntryMonth) invoiceEntryMonth.value = month;
+}
+
+function buildFixedExpenseOptions() {
+  const cardSelect = document.getElementById('fixedCard');
+  const invoiceCard = document.getElementById('invoiceCard');
+  const options = customCards.map(card => `<option value="${card.id}">${escapeHTML(card.name)}</option>`).join('');
+  if (cardSelect) cardSelect.innerHTML = options || '<option value="">Cadastre um cartão primeiro</option>';
+  if (invoiceCard) invoiceCard.innerHTML = options || '<option value="">Cadastre um cartão primeiro</option>';
+  toggleFixedCardField();
+}
+
+function toggleFixedCardField() {
+  const group = document.getElementById('fixedCardGroup');
+  if (group) group.hidden = document.getElementById('fixedPayment')?.value !== 'credito';
+}
+
+function resetFixedExpenseForm() {
+  editingFixedExpenseId = null;
+  ['fixedDesc','fixedAmount'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const day = document.getElementById('fixedChargeDay');
+  const start = document.getElementById('fixedStartMonth');
+  const payment = document.getElementById('fixedPayment');
+  if (day) day.value = '1';
+  if (start) start.value = getCurrentMonthStr();
+  if (payment) payment.value = 'pix';
+  const title = document.getElementById('fixedFormTitle');
+  const button = document.getElementById('saveFixedExpenseBtn');
+  const cancel = document.getElementById('cancelFixedExpenseBtn');
+  if (title) title.textContent = 'Nova despesa fixa';
+  if (button) button.textContent = 'Adicionar despesa';
+  if (cancel) cancel.hidden = true;
+  toggleFixedCardField();
+}
+
+function saveFixedExpense() {
+  const wasEditing = Boolean(editingFixedExpenseId);
+  const desc = document.getElementById('fixedDesc')?.value.trim();
+  const amount = parseAmount(document.getElementById('fixedAmount')?.value);
+  const chargeDay = Number(document.getElementById('fixedChargeDay')?.value);
+  const startMonth = document.getElementById('fixedStartMonth')?.value;
+  const cat = document.getElementById('fixedCategory')?.value || 'other';
+  const payment = document.getElementById('fixedPayment')?.value || 'outro';
+  const cardKey = payment === 'credito' ? document.getElementById('fixedCard')?.value : null;
+  if (!desc) return showToast('Informe a descrição da despesa', 'error');
+  if (amount <= 0) return showToast('Informe um valor válido', 'error');
+  if (!chargeDay || chargeDay < 1 || chargeDay > 31) return showToast('O dia deve estar entre 1 e 31', 'error');
+  if (!startMonth) return showToast('Informe o mês inicial', 'error');
+  if (payment === 'credito' && !cardKey) return showToast('Selecione o cartão', 'error');
+
+  const data = { desc, amount, chargeDay, startMonth, cat, payment, cardKey, active: true };
+  if (editingFixedExpenseId) {
+    const index = fixedExpenses.findIndex(item => item.id === editingFixedExpenseId);
+    if (index === -1) return;
+    fixedExpenses[index] = { ...fixedExpenses[index], ...data, updatedAt: new Date().toISOString() };
+    transactions.filter(t => t.fixedExpenseId === editingFixedExpenseId && t.fixedExpenseMonth >= getCurrentMonthStr()).forEach(t => {
+      const [year, month] = t.fixedExpenseMonth.split('-').map(Number);
+      const card = customCards.find(c => c.id === cardKey);
+      Object.assign(t, { desc, amount, cat, payment, cardKey: payment === 'credito' ? cardKey : null, cardLabel: payment === 'credito' ? (card?.name || null) : null, date: getSafeMonthDate(year, month - 1, chargeDay) });
+    });
+  } else {
+    fixedExpenses.push({ id: uid(), ...data, generatedMonths: [], createdAt: new Date().toISOString() });
+  }
+  saveData();
+  processFixedExpenses();
+  resetFixedExpenseForm();
+  renderFixedExpenses();
+  renderDashboardKPIs();
+  showToast(wasEditing ? 'Despesa fixa atualizada ✓' : 'Despesa fixa adicionada ✓', 'success');
+}
+
+function editFixedExpense(id) {
+  const item = fixedExpenses.find(expense => expense.id === id);
+  if (!item) return;
+  editingFixedExpenseId = id;
+  document.getElementById('fixedDesc').value = item.desc;
+  document.getElementById('fixedAmount').value = fmt(item.amount);
+  document.getElementById('fixedChargeDay').value = item.chargeDay;
+  document.getElementById('fixedStartMonth').value = item.startMonth;
+  document.getElementById('fixedCategory').value = item.cat;
+  document.getElementById('fixedPayment').value = item.payment;
+  toggleFixedCardField();
+  if (item.cardKey) document.getElementById('fixedCard').value = item.cardKey;
+  document.getElementById('fixedFormTitle').textContent = `Editar ${item.desc}`;
+  document.getElementById('saveFixedExpenseBtn').textContent = 'Salvar alterações';
+  document.getElementById('cancelFixedExpenseBtn').hidden = false;
+  document.getElementById('fixedDesc').focus();
+}
+
+function toggleFixedExpense(id) {
+  const item = fixedExpenses.find(expense => expense.id === id);
+  if (!item) return;
+  item.active = item.active === false;
+  saveData();
+  processFixedExpenses();
+  renderFixedExpenses();
+}
+
+function deleteFixedExpense(id) {
+  const item = fixedExpenses.find(expense => expense.id === id);
+  if (!item || !confirm(`Excluir a despesa fixa “${item.desc}”? As cobranças já lançadas serão mantidas.`)) return;
+  fixedExpenses = fixedExpenses.filter(expense => expense.id !== id);
+  if (editingFixedExpenseId === id) resetFixedExpenseForm();
+  saveData();
+  renderFixedExpenses();
+  showToast('Despesa fixa removida; lançamentos anteriores foram preservados', 'warning');
+}
+
+function renderFixedExpenses() {
+  buildFixedExpenseOptions();
+  const list = document.getElementById('fixedExpensesList');
+  const summary = document.getElementById('fixedExpensesSummary');
+  if (!list) return;
+  const activeTotal = fixedExpenses.filter(item => item.active !== false).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  if (summary) summary.textContent = `R$ ${fmt(activeTotal)} por mês`;
+  if (!fixedExpenses.length) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">📌</div><p>Nenhuma despesa fixa cadastrada.</p></div>';
+    return;
+  }
+  list.innerHTML = fixedExpenses.map(item => {
+    const cat = getCat(item.cat);
+    const card = customCards.find(c => c.id === item.cardKey);
+    const paymentLabel = item.payment === 'credito' ? `Cartão ${card?.name || ''}` : item.payment;
+    return `<article class="management-item ${item.active === false ? 'is-paused' : ''}">
+      <div class="management-icon" style="background:${cat.color}20;color:${cat.color}">${cat.emoji || '📌'}</div>
+      <div class="management-main"><strong>${escapeHTML(item.desc)}</strong><span>Todo dia ${item.chargeDay} · ${escapeHTML(paymentLabel)} · desde ${item.startMonth}</span></div>
+      <div class="management-value">R$ ${fmt(item.amount)}<small>${item.active === false ? 'Pausada' : 'Ativa'}</small></div>
+      <div class="management-actions"><button class="btn btn-ghost btn-sm" onclick="editFixedExpense('${item.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="toggleFixedExpense('${item.id}')">${item.active === false ? 'Ativar' : 'Pausar'}</button><button class="icon-danger" onclick="deleteFixedExpense('${item.id}')" aria-label="Excluir">×</button></div>
+    </article>`;
+  }).join('');
+}
+
+function saveInvoiceAdjustment() {
+  const cardId = document.getElementById('invoiceCard')?.value;
+  const month = document.getElementById('invoiceEntryMonth')?.value;
+  const amount = parseAmount(document.getElementById('invoiceAmount')?.value);
+  if (!cardId) return showToast('Selecione um cartão', 'error');
+  if (!month) return showToast('Selecione o mês da fatura', 'error');
+  if (amount < 0) return showToast('Informe um valor igual ou maior que zero', 'error');
+  const existing = cardInvoiceAdjustments.find(item => item.cardId === cardId && item.month === month);
+  if (existing) {
+    existing.amount = amount;
+    existing.updatedAt = new Date().toISOString();
+  } else {
+    cardInvoiceAdjustments.push({ id: uid(), cardId, month, amount, createdAt: new Date().toISOString() });
+  }
+  saveData();
+  document.getElementById('invoiceAmount').value = '';
+  document.getElementById('invoicesPeriodMode').value = 'month';
+  document.getElementById('invoicesMonth').value = month;
+  syncPeriodFilter('invoices');
+  renderInvoices();
+  renderDashboardKPIs();
+  showToast('Valor manual da fatura salvo ✓', 'success');
+}
+
+function deleteInvoiceAdjustment(id) {
+  cardInvoiceAdjustments = cardInvoiceAdjustments.filter(item => item.id !== id);
+  saveData();
+  renderInvoices();
+  renderDashboardKPIs();
+  showToast('Valor manual removido', 'warning');
+}
+
+function renderInvoices() {
+  buildFixedExpenseOptions();
+  const grid = document.getElementById('invoiceGrid');
+  const totalEl = document.getElementById('invoicePeriodTotal');
+  if (!grid) return;
+  const months = getInvoiceMonthsForPeriod('invoices');
+  const total = getAllCardsInvoiceTotal('invoices');
+  if (totalEl) totalEl.textContent = `R$ ${fmt(total)}`;
+  if (!customCards.length) {
+    grid.innerHTML = '<div class="empty-state"><div class="empty-icon">💳</div><p>Cadastre um cartão em Preferências para começar.</p></div>';
+    return;
+  }
+  grid.innerHTML = customCards.map(card => {
+    const transactionsTotal = months.reduce((sum, month) => sum + getCardTransactionsTotal(card.id, month), 0);
+    const manualTotal = months.reduce((sum, month) => sum + getCardManualTotal(card.id, month), 0);
+    const adjustments = cardInvoiceAdjustments.filter(item => item.cardId === card.id && months.includes(item.month));
+    return `<article class="invoice-card">
+      <div class="invoice-card-head"><div class="cc-brand-icon" style="background:${card.color}">${escapeHTML(card.initials || card.name.slice(0,2))}</div><div><strong>${escapeHTML(card.name)}</strong><span>Fatura calculada</span></div><b>R$ ${fmt(transactionsTotal + manualTotal)}</b></div>
+      <div class="invoice-breakdown"><span>Transações <strong>R$ ${fmt(transactionsTotal)}</strong></span><span>Ajuste manual <strong>R$ ${fmt(manualTotal)}</strong></span></div>
+      ${adjustments.length ? `<div class="invoice-adjustments">${adjustments.map(item => `<span>${item.month}: R$ ${fmt(item.amount)} <button onclick="deleteInvoiceAdjustment('${item.id}')" aria-label="Remover ajuste">×</button></span>`).join('')}</div>` : ''}
+    </article>`;
+  }).join('');
 }
 
 function renderCards() {
   const selection = getPeriodSelection('cards');
   const periodValue = selection.value;
-  const periodNoun = getPeriodNoun('cards');
+  const periodNoun = selection.mode === 'year' ? 'Ano' : 'Mês';
   const el = document.getElementById('cardsGrid');
   if (!el) return;
 
@@ -2226,17 +2534,16 @@ function renderCards() {
     };
 
     // Gasto no período selecionado
-    const periodAmount = transactions
-      .filter(t => isThisCard(t) && matchesPeriod(t.date, 'cards'))
-      .reduce((sum, t) => sum + t.amount, 0);
+    const periodMonths = getInvoiceMonthsForPeriod('cards');
+    const transactionPeriodAmount = periodMonths.reduce((sum, month) => sum + getCardTransactionsTotal(c.id, month), 0);
+    const manualPeriodAmount = periodMonths.reduce((sum, month) => sum + getCardManualTotal(c.id, month), 0);
+    const periodAmount = transactionPeriodAmount + manualPeriodAmount;
 
     // O limite sempre considera a fatura mensal correspondente ao período.
     const limitMonth = selection.mode === 'day'
       ? periodValue.slice(0, 7)
       : selection.mode === 'month' ? periodValue : getCurrentMonthStr();
-    const invoiceAmount = transactions
-      .filter(t => isThisCard(t) && t.date?.startsWith(limitMonth))
-      .reduce((sum, t) => sum + t.amount, 0);
+    const invoiceAmount = getCardInvoiceTotal(c.id, limitMonth);
 
     // Parcelas futuras após a fatura usada no cálculo do limite.
     const futureTxs = transactions.filter(t =>
@@ -2268,9 +2575,10 @@ function renderCards() {
             <span>💳 Vencimento: <strong>${c.dueDay ? 'Dia ' + c.dueDay : 'Não def.'}</strong></span>
           </div>
           <div class="cc-stat-row">
-            <span class="cc-stat-label">Gasto no ${periodNoun}</span>
+            <span class="cc-stat-label">Fatura no ${periodNoun}</span>
             <span class="cc-val-monthly">R$ ${fmt(periodAmount)}</span>
           </div>
+          ${manualPeriodAmount > 0 ? `<div class="cc-stat-row cc-manual-row"><span>Inclui ajuste manual</span><span>R$ ${fmt(manualPeriodAmount)}</span></div>` : ''}
           ${pendingHtml}
           <div class="cc-stat-row">
             <span class="cc-stat-label">Limite Disponível${selection.mode === 'year' ? ' (atual)' : ''}</span>
