@@ -423,22 +423,37 @@ function processFixedExpenses() {
   }
 }
 
-function isTransactionForCard(transaction, cardId) {
+function normalizeMonth(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{1,2})/);
+  return match ? `${match[1]}-${String(Number(match[2])).padStart(2, '0')}` : '';
+}
+
+function isCreditTransaction(transaction) {
   if (transaction.type !== 'expense') return false;
+  const payment = String(transaction.payment || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (payment.includes('credito')) return true;
+  if (transaction.installmentGroupId || Number(transaction.installments) > 1) return true;
+  return Boolean(transaction.cardKey && !payment);
+}
+
+function isTransactionForCard(transaction, cardId) {
+  if (!isCreditTransaction(transaction)) return false;
   if (transaction.cardKey) return transaction.cardKey === cardId;
-  const payment = String(transaction.payment || '').toLowerCase();
-  return cardId === 'outro' && (payment === 'credito' || payment.includes('crédito') || payment.includes('credito'));
+  return cardId === 'outro';
 }
 
 function getCardTransactionsTotal(cardId, month) {
   return transactions
-    .filter(t => isTransactionForCard(t, cardId) && t.date?.startsWith(month))
+    .filter(t => isTransactionForCard(t, cardId) && normalizeMonth(t.date) === normalizeMonth(month))
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 }
 
 function getCardManualTotal(cardId, month) {
   return cardInvoiceAdjustments
-    .filter(item => item.cardId === cardId && item.month === month)
+    .filter(item => item.cardId === cardId && normalizeMonth(item.month) === normalizeMonth(month))
     .reduce((sum, item) => sum + Number(item.amount || 0), 0);
 }
 
@@ -449,12 +464,18 @@ function getCardInvoiceTotal(cardId, month) {
 function getInvoiceMonthsForPeriod(prefix) {
   const { mode, value } = getPeriodSelection(prefix);
   if (mode === 'year') return Array.from({ length: 12 }, (_, index) => `${value}-${String(index + 1).padStart(2, '0')}`);
-  return [mode === 'day' ? value.slice(0, 7) : value];
+  return [normalizeMonth(mode === 'day' ? value.slice(0, 7) : value)];
 }
 
 function getAllCardsInvoiceTotal(prefix) {
-  const months = getInvoiceMonthsForPeriod(prefix);
-  return customCards.reduce((total, card) => total + months.reduce((sum, month) => sum + getCardInvoiceTotal(card.id, month), 0), 0);
+  const months = new Set(getInvoiceMonthsForPeriod(prefix));
+  const transactionTotal = transactions
+    .filter(transaction => isCreditTransaction(transaction) && months.has(normalizeMonth(transaction.date)))
+    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const manualTotal = cardInvoiceAdjustments
+    .filter(item => months.has(normalizeMonth(item.month)))
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  return transactionTotal + manualTotal;
 }
 
 function setLoginState(message = '', type = 'info', busy = false) {
@@ -2475,12 +2496,12 @@ function renderFixedExpenses() {
 
 function saveInvoiceAdjustment() {
   const cardId = document.getElementById('invoiceCard')?.value;
-  const month = document.getElementById('invoiceEntryMonth')?.value;
+  const month = normalizeMonth(document.getElementById('invoiceEntryMonth')?.value);
   const amount = parseAmount(document.getElementById('invoiceAmount')?.value);
   if (!cardId) return showToast('Selecione um cartão', 'error');
   if (!month) return showToast('Selecione o mês da fatura', 'error');
   if (amount < 0) return showToast('Informe um valor igual ou maior que zero', 'error');
-  const existing = cardInvoiceAdjustments.find(item => item.cardId === cardId && item.month === month);
+  const existing = cardInvoiceAdjustments.find(item => item.cardId === cardId && normalizeMonth(item.month) === month);
   if (existing) {
     existing.amount = amount;
     existing.updatedAt = new Date().toISOString();
@@ -2522,7 +2543,7 @@ function renderInvoices() {
   grid.innerHTML = customCards.map(card => {
     const transactionsTotal = months.reduce((sum, month) => sum + getCardTransactionsTotal(card.id, month), 0);
     const manualTotal = months.reduce((sum, month) => sum + getCardManualTotal(card.id, month), 0);
-    const adjustments = cardInvoiceAdjustments.filter(item => item.cardId === card.id && months.includes(item.month));
+    const adjustments = cardInvoiceAdjustments.filter(item => item.cardId === card.id && months.includes(normalizeMonth(item.month)));
     return `<article class="invoice-card">
       <div class="invoice-card-head"><div class="cc-brand-icon" style="background:${card.color}">${escapeHTML(card.initials || card.name.slice(0,2))}</div><div><strong>${escapeHTML(card.name)}</strong><span>Fatura calculada</span></div><b>R$ ${fmt(transactionsTotal + manualTotal)}</b></div>
       <div class="invoice-breakdown"><span>Transações <strong>R$ ${fmt(transactionsTotal)}</strong></span><span>Ajuste manual <strong>R$ ${fmt(manualTotal)}</strong></span></div>
