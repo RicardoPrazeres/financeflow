@@ -502,6 +502,58 @@ body::after{
 .invoice-adjustments span{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border-radius:6px;background:rgba(99,102,241,.1);font-size:10px;color:var(--accent-bright);}
 .invoice-adjustments button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;padding:0;}
 .cc-manual-row{font-size:11px;color:var(--text3);}
+.cc-limit-breakdown{margin-top:4px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text2);}
+.cc-limit-breakdown strong{font-size:12px;color:var(--text);}
+.cc-manual-limit{padding:7px 9px;border-radius:7px;background:rgba(56,189,248,.08);font-size:11px;color:#7dd3fc;}
+.cc-manual-limit strong{color:#7dd3fc;}
+
+/* ══════════════════════ LOANS ══════════════════════ */
+.loan-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:20px;}
+.loan-summary-card{display:flex;flex-direction:column;gap:5px;padding:17px 18px;background:var(--surface);border:1px solid var(--border);border-top:3px solid var(--accent);border-radius:var(--radius);}
+.loan-summary-card.received{border-top-color:var(--green);}
+.loan-summary-card.outstanding{border-top-color:var(--yellow);}
+.loan-summary-card.people{border-top-color:#38bdf8;}
+.loan-summary-card>span{font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text2);}
+.loan-summary-card>strong{font-family:'Space Grotesk',sans-serif;font-size:22px;color:var(--text);}
+.loan-summary-card>small{font-size:10px;color:var(--text3);}
+.loan-layout{grid-template-columns:minmax(300px,360px) minmax(0,1fr);}
+.loan-list-column{min-width:0;}
+.loan-filters{display:flex;gap:10px;margin-bottom:12px;}
+.loan-filters .search-field{flex:1;}
+.loan-filters select{width:170px;}
+.loans-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;}
+.loan-card{padding:18px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);transition:border-color .2s,box-shadow .2s;min-width:0;}
+.loan-card:hover{border-color:var(--border2);box-shadow:var(--shadow-sm);}
+.loan-card.loan-overdue{border-color:rgba(239,68,68,.35);}
+.loan-card.loan-paid{opacity:.78;}
+.loan-card-head{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:11px;align-items:center;}
+.loan-avatar{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--accent),#38bdf8);color:white;font-size:12px;font-weight:800;letter-spacing:.5px;}
+.loan-person{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.loan-person strong{font-size:14px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.loan-person span{font-size:10px;color:var(--text3);}
+.loan-status{padding:5px 8px;border-radius:20px;background:var(--accent-glow);color:var(--accent-bright);font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;}
+.loan-overdue .loan-status{background:var(--red-dim);color:#f87171;}
+.loan-paid .loan-status{background:var(--green-dim);color:#4ade80;}
+.loan-values{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px;}
+.loan-values>div{display:flex;flex-direction:column;gap:4px;padding:9px;background:var(--surface2);border-radius:8px;min-width:0;}
+.loan-values span{font-size:9px;text-transform:uppercase;color:var(--text3);}
+.loan-values strong{font-size:12px;color:var(--text2);white-space:nowrap;}
+.loan-values .loan-balance strong{color:var(--yellow);}
+.loan-paid .loan-values .loan-balance strong{color:var(--green);}
+.loan-progress{height:5px;margin:12px 0;background:var(--surface3);border-radius:5px;overflow:hidden;}
+.loan-progress>div{height:100%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:inherit;}
+.loan-meta{display:flex;flex-direction:column;gap:4px;font-size:10px;color:var(--text3);}
+.loan-meta span{overflow-wrap:anywhere;}
+.loan-history{margin-top:12px;padding:9px 10px;background:var(--surface2);border-radius:8px;}
+.loan-history summary{cursor:pointer;font-size:10px;font-weight:700;color:var(--text2);}
+.loan-history>div{display:grid;grid-template-columns:minmax(0,1fr) auto 20px;gap:8px;align-items:center;padding-top:8px;margin-top:8px;border-top:1px solid var(--border);font-size:10px;color:var(--text3);}
+.loan-history strong{color:var(--green);white-space:nowrap;}
+.loan-history button{border:0;background:transparent;color:var(--text3);font-size:15px;cursor:pointer;}
+.loan-history button:hover{color:var(--red);}
+.loan-actions{display:flex;justify-content:flex-end;align-items:center;gap:7px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+.modal-compact{max-width:480px;}
+.modal-subtitle{font-size:11px;color:var(--text3);margin-top:3px;}
+.payment-balance{margin-bottom:16px;padding:11px 13px;border-radius:8px;background:var(--accent-glow);color:var(--accent-bright);font-size:13px;font-weight:700;}
 
 /* ══════════════════════ CARDS (CREDIT) ══════════════════════ */
 .cards-grid {
@@ -1118,6 +1170,8 @@ tr:hover td{background:var(--surface2);}
   .kpi-grid{grid-template-columns:repeat(3,1fr);}
   .feature-layout,.invoice-hero{grid-template-columns:1fr;}
   .invoice-entry{grid-template-columns:1fr 1fr;}
+  .loan-summary-grid{grid-template-columns:repeat(2,1fr);}
+  .loan-layout{grid-template-columns:1fr;}
 }
 
 @media(max-width:900px){
@@ -1145,6 +1199,7 @@ tr:hover td{background:var(--surface2);}
   .chart-card{width:100%;max-width:100%;}
   .management-item{grid-template-columns:42px minmax(0,1fr) auto;}
   .management-actions{grid-column:2/-1;justify-content:flex-end;}
+  .loans-list{grid-template-columns:1fr;}
 }
 
 @media(max-width:480px){
@@ -1185,6 +1240,14 @@ tr:hover td{background:var(--surface2);}
   .management-value{grid-column:2;text-align:left;}
   .management-actions{grid-column:1/-1;justify-content:flex-end;}
   .management-actions .btn{padding:7px 9px;}
+  .loan-summary-grid{grid-template-columns:1fr 1fr;gap:9px;}
+  .loan-summary-card{padding:14px;}
+  .loan-summary-card>strong{font-size:18px;}
+  .loan-filters{flex-direction:column;}
+  .loan-filters select{width:100%;}
+  .loan-values{grid-template-columns:1fr;}
+  .loan-actions{flex-wrap:wrap;}
+  .loan-actions .btn:first-child{width:100%;justify-content:center;}
 }
 
 @keyframes fadeInUp {

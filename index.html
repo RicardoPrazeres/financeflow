@@ -317,6 +317,9 @@
       <a class="nav-item" data-section="invoices" href="#">
         <span class="nav-icon">🧮</span> Faturas
       </a>
+      <a class="nav-item" data-section="loans" href="#">
+        <span class="nav-icon">🤝</span> Emprestado
+      </a>
       <a class="nav-item" data-section="budgets" href="#">
         <span class="nav-icon">🎯</span> Orçamentos
       </a>
@@ -625,6 +628,44 @@
         </div>
         <p class="invoice-note">Use somente o valor que faltou lançar. O total final será: transações cadastradas + valor manual.</p>
         <div id="invoiceGrid" class="invoice-grid"></div>
+      </section>
+
+      <!-- ═══ LOANS ═══ -->
+      <section id="sec-loans" class="section">
+        <div class="section-header">
+          <div><span class="section-eyebrow">Valores a receber</span><h1 class="section-title">Emprestado</h1></div>
+        </div>
+
+        <div class="loan-summary-grid">
+          <div class="loan-summary-card"><span>Total emprestado</span><strong id="loanTotalLent">R$ 0,00</strong><small>valor original dos registros</small></div>
+          <div class="loan-summary-card received"><span>Já recebido</span><strong id="loanTotalReceived">R$ 0,00</strong><small>pagamentos registrados</small></div>
+          <div class="loan-summary-card outstanding"><span>Falta receber</span><strong id="loanOutstanding">R$ 0,00</strong><small>saldo ainda em aberto</small></div>
+          <div class="loan-summary-card people"><span>Pessoas devendo</span><strong id="loanPeopleOpen">0</strong><small>registros com saldo</small></div>
+        </div>
+
+        <div class="feature-layout loan-layout">
+          <div class="card feature-form-card">
+            <div class="card-header"><h3 id="loanFormTitle">Novo valor emprestado</h3></div>
+            <div class="feature-form">
+              <label class="form-group full"><span class="form-label">Nome da pessoa</span><input id="loanPerson" class="form-input" placeholder="Ex: João Silva" autocomplete="off"></label>
+              <div class="form-grid">
+                <label class="form-group"><span class="form-label">Valor emprestado</span><input id="loanAmount" class="form-input" inputmode="decimal" placeholder="0,00"></label>
+                <label class="form-group"><span class="form-label">Data do empréstimo</span><input id="loanDate" type="date" class="form-input"></label>
+                <label class="form-group full"><span class="form-label">Vencimento opcional</span><input id="loanDueDate" type="date" class="form-input"></label>
+                <label class="form-group full"><span class="form-label">Observações</span><textarea id="loanNotes" class="form-input" rows="3" placeholder="Motivo, forma combinada de pagamento..."></textarea></label>
+              </div>
+              <div class="feature-form-actions"><button class="btn btn-ghost" id="cancelLoanEditBtn" hidden onclick="resetLoanForm()">Cancelar</button><button class="btn btn-primary" id="saveLoanBtn" onclick="saveLoan()">Adicionar pessoa</button></div>
+            </div>
+          </div>
+
+          <div class="loan-list-column">
+            <div class="loan-filters">
+              <div class="search-field"><span aria-hidden="true">⌕</span><input id="loanSearch" class="filter-input" type="search" placeholder="Buscar pessoa..." oninput="renderLoans()"></div>
+              <select id="loanStatusFilter" class="filter-input" onchange="renderLoans()"><option value="all">Todos os status</option><option value="open">A receber</option><option value="overdue">Atrasados</option><option value="paid">Quitados</option></select>
+            </div>
+            <div id="loansList" class="loans-list"></div>
+          </div>
+        </div>
       </section>
 
       <!-- ═══ BUDGETS ═══ -->
@@ -969,6 +1010,20 @@
         <button class="btn btn-ghost" onclick="closeAporteModal()">Cancelar</button>
         <button class="btn btn-primary" onclick="saveAporte()">Confirmar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══ MODAL: LOAN PAYMENT ═══ -->
+  <div class="modal-overlay" id="loanPaymentModal">
+    <div class="modal modal-compact">
+      <div class="modal-header"><div><h2 class="modal-title">Registrar pagamento</h2><p class="modal-subtitle" id="loanPaymentPerson"></p></div><button class="modal-close" onclick="closeLoanPaymentModal()">✕</button></div>
+      <div class="payment-balance" id="loanPaymentBalance">Falta receber R$ 0,00</div>
+      <div class="form-grid">
+        <label class="form-group"><span class="form-label">Valor recebido</span><input id="loanPaymentAmount" class="form-input" inputmode="decimal" placeholder="0,00"></label>
+        <label class="form-group"><span class="form-label">Data</span><input id="loanPaymentDate" class="form-input" type="date"></label>
+        <label class="form-group full"><span class="form-label">Observação opcional</span><input id="loanPaymentNotes" class="form-input" placeholder="Ex: Pix, primeira parcela"></label>
+      </div>
+      <div class="modal-footer"><button class="btn btn-ghost" onclick="closeLoanPaymentModal()">Cancelar</button><button class="btn btn-primary" onclick="saveLoanPayment()">Confirmar pagamento</button></div>
     </div>
   </div>
 

@@ -252,10 +252,13 @@ let categories = [];
 let goals = [];
 let fixedExpenses = [];
 let cardInvoiceAdjustments = [];
+let loans = [];
 let editingId = null;
 let editingGoalId = null;
 let editingCardId = null;
 let editingFixedExpenseId = null;
+let editingLoanId = null;
+let payingLoanId = null;
 let loginInProgress = false;
 let currentType = 'expense';
 let chartMonthly = null, chartCategory = null, chartAnnual = null, chartTopCat = null, chartTrend = null;
@@ -540,6 +543,7 @@ function loadData() {
   goals        = JSON.parse(localStorage.getItem('ff_goals')         || '[]');
   fixedExpenses = JSON.parse(localStorage.getItem('ff_fixed_expenses') || '[]');
   cardInvoiceAdjustments = JSON.parse(localStorage.getItem('ff_card_invoice_adjustments') || '[]');
+  loans = JSON.parse(localStorage.getItem('ff_loans') || '[]');
 }
 
 let isInitialSync = true;
@@ -555,6 +559,7 @@ function loadDataFromFirebase() {
       goals        = JSON.parse(data.goals        || '[]');
       fixedExpenses = JSON.parse(data.fixedExpenses || '[]');
       cardInvoiceAdjustments = JSON.parse(data.cardInvoiceAdjustments || '[]');
+      loans = JSON.parse(data.loans || '[]');
       localStorage.setItem('ff_transactions', JSON.stringify(transactions));
       localStorage.setItem('ff_budgets',      JSON.stringify(budgets));
       localStorage.setItem('ff_categories',   JSON.stringify(categories));
@@ -562,6 +567,7 @@ function loadDataFromFirebase() {
       localStorage.setItem('ff_goals',         JSON.stringify(goals));
       localStorage.setItem('ff_fixed_expenses', JSON.stringify(fixedExpenses));
       localStorage.setItem('ff_card_invoice_adjustments', JSON.stringify(cardInvoiceAdjustments));
+      localStorage.setItem('ff_loans', JSON.stringify(loans));
     } else {
        if (isInitialSync) {
          loadData(); 
@@ -599,6 +605,7 @@ function saveData() {
   localStorage.setItem('ff_goals',         JSON.stringify(goals));
   localStorage.setItem('ff_fixed_expenses', JSON.stringify(fixedExpenses));
   localStorage.setItem('ff_card_invoice_adjustments', JSON.stringify(cardInvoiceAdjustments));
+  localStorage.setItem('ff_loans', JSON.stringify(loans));
   
   if (currentUser && db) {
     db.collection('users').doc(currentUser.uid).set({
@@ -609,6 +616,7 @@ function saveData() {
       goals: JSON.stringify(goals),
       fixedExpenses: JSON.stringify(fixedExpenses),
       cardInvoiceAdjustments: JSON.stringify(cardInvoiceAdjustments),
+      loans: JSON.stringify(loans),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }).catch(e => {
       console.error("Erro ao salvar nuvem", e);
@@ -663,7 +671,7 @@ function navigate(sec) {
   document.getElementById(`sec-${sec}`).classList.add('active');
   document.querySelector(`[data-section="${sec}"]`)?.classList.add('active');
 
-  const titles = { dashboard:'Dashboard', transactions:'Transações', fixedExpenses:'Despesas Fixas', cards:'Meus Cartões', invoices:'Faturas', budgets:'Orçamentos', goals:'Metas', reports:'Relatórios', settings:'Preferências' };
+  const titles = { dashboard:'Dashboard', transactions:'Transações', fixedExpenses:'Despesas Fixas', cards:'Meus Cartões', invoices:'Faturas', loans:'Emprestado', budgets:'Orçamentos', goals:'Metas', reports:'Relatórios', settings:'Preferências' };
   document.getElementById('topbarTitle').textContent = titles[sec] || sec;
 
   closeSidebar();
@@ -685,6 +693,7 @@ function renderSection(sec) {
   if (sec === 'fixedExpenses') renderFixedExpenses();
   if (sec === 'cards')        renderCards();
   if (sec === 'invoices')     renderInvoices();
+  if (sec === 'loans')        renderLoans();
   if (sec === 'budgets')      renderBudgets();
   if (sec === 'goals')        renderGoals();
   if (sec === 'reports')      renderReports();
@@ -2230,6 +2239,7 @@ function exportJSON() {
     budgets,
     fixedExpenses,
     cardInvoiceAdjustments,
+    loans,
     GEMINI_API_KEY
   };
   const jsonStr = JSON.stringify(data, null, 2);
@@ -2269,6 +2279,7 @@ function handleImportJSON(event) {
         if (data.budgets) budgets = data.budgets;
         if (Array.isArray(data.fixedExpenses)) fixedExpenses = data.fixedExpenses;
         if (Array.isArray(data.cardInvoiceAdjustments)) cardInvoiceAdjustments = data.cardInvoiceAdjustments;
+        if (Array.isArray(data.loans)) loans = data.loans;
         if (data.GEMINI_API_KEY) {
           GEMINI_API_KEY = data.GEMINI_API_KEY;
           localStorage.setItem('ff_gemini_api_key', GEMINI_API_KEY);
@@ -2308,6 +2319,10 @@ function esc(s) { const d=document.createElement('div');d.textContent=s;return d
 
 function setDefaultDate() {
   document.getElementById('fDate').value = new Date().toISOString().slice(0,10);
+  const loanDate = document.getElementById('loanDate');
+  const loanPaymentDate = document.getElementById('loanPaymentDate');
+  if (loanDate) loanDate.value = getTodayStr();
+  if (loanPaymentDate) loanPaymentDate.value = getTodayStr();
 }
 function setDefaultFilterMonth() {
   const today = getTodayStr();
@@ -2478,6 +2493,7 @@ function saveInvoiceAdjustment() {
   document.getElementById('invoicesMonth').value = month;
   syncPeriodFilter('invoices');
   renderInvoices();
+  renderCards();
   renderDashboardKPIs();
   showToast('Valor manual da fatura salvo ✓', 'success');
 }
@@ -2486,6 +2502,7 @@ function deleteInvoiceAdjustment(id) {
   cardInvoiceAdjustments = cardInvoiceAdjustments.filter(item => item.id !== id);
   saveData();
   renderInvoices();
+  renderCards();
   renderDashboardKPIs();
   showToast('Valor manual removido', 'warning');
 }
@@ -2510,6 +2527,182 @@ function renderInvoices() {
       <div class="invoice-card-head"><div class="cc-brand-icon" style="background:${card.color}">${escapeHTML(card.initials || card.name.slice(0,2))}</div><div><strong>${escapeHTML(card.name)}</strong><span>Fatura calculada</span></div><b>R$ ${fmt(transactionsTotal + manualTotal)}</b></div>
       <div class="invoice-breakdown"><span>Transações <strong>R$ ${fmt(transactionsTotal)}</strong></span><span>Ajuste manual <strong>R$ ${fmt(manualTotal)}</strong></span></div>
       ${adjustments.length ? `<div class="invoice-adjustments">${adjustments.map(item => `<span>${item.month}: R$ ${fmt(item.amount)} <button onclick="deleteInvoiceAdjustment('${item.id}')" aria-label="Remover ajuste">×</button></span>`).join('')}</div>` : ''}
+    </article>`;
+  }).join('');
+}
+
+function getLoanPaid(loan) {
+  return (loan.payments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+}
+
+function getLoanBalance(loan) {
+  return Math.max(0, Number(loan.amount || 0) - getLoanPaid(loan));
+}
+
+function getLoanStatus(loan) {
+  if (getLoanBalance(loan) <= 0) return 'paid';
+  if (loan.dueDate && loan.dueDate < getTodayStr()) return 'overdue';
+  return 'open';
+}
+
+function formatDateBR(date) {
+  if (!date) return 'Sem data';
+  return new Date(`${date}T12:00:00`).toLocaleDateString('pt-BR');
+}
+
+function resetLoanForm() {
+  editingLoanId = null;
+  ['loanPerson','loanAmount','loanDueDate','loanNotes'].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.value = '';
+  });
+  const date = document.getElementById('loanDate');
+  if (date) date.value = getTodayStr();
+  const title = document.getElementById('loanFormTitle');
+  const button = document.getElementById('saveLoanBtn');
+  const cancel = document.getElementById('cancelLoanEditBtn');
+  if (title) title.textContent = 'Novo valor emprestado';
+  if (button) button.textContent = 'Adicionar pessoa';
+  if (cancel) cancel.hidden = true;
+}
+
+function saveLoan() {
+  const person = document.getElementById('loanPerson')?.value.trim();
+  const amount = parseAmount(document.getElementById('loanAmount')?.value);
+  const loanDate = document.getElementById('loanDate')?.value || getTodayStr();
+  const dueDate = document.getElementById('loanDueDate')?.value || '';
+  const notes = document.getElementById('loanNotes')?.value.trim() || '';
+  if (!person) return showToast('Informe o nome da pessoa', 'error');
+  if (amount <= 0) return showToast('Informe um valor válido', 'error');
+  if (dueDate && dueDate < loanDate) return showToast('O vencimento não pode ser anterior ao empréstimo', 'error');
+
+  const wasEditing = Boolean(editingLoanId);
+  if (wasEditing) {
+    const index = loans.findIndex(loan => loan.id === editingLoanId);
+    if (index === -1) return;
+    const paid = getLoanPaid(loans[index]);
+    if (amount < paid) return showToast(`O valor não pode ser menor que o total já recebido (R$ ${fmt(paid)})`, 'error');
+    loans[index] = { ...loans[index], person, amount, loanDate, dueDate, notes, updatedAt: new Date().toISOString() };
+  } else {
+    loans.push({ id: uid(), person, amount, loanDate, dueDate, notes, payments: [], createdAt: new Date().toISOString() });
+  }
+  saveData();
+  resetLoanForm();
+  renderLoans();
+  showToast(wasEditing ? 'Empréstimo atualizado ✓' : 'Valor emprestado registrado ✓', 'success');
+}
+
+function editLoan(id) {
+  const loan = loans.find(item => item.id === id);
+  if (!loan) return;
+  editingLoanId = id;
+  document.getElementById('loanPerson').value = loan.person;
+  document.getElementById('loanAmount').value = fmt(loan.amount);
+  document.getElementById('loanDate').value = loan.loanDate || getTodayStr();
+  document.getElementById('loanDueDate').value = loan.dueDate || '';
+  document.getElementById('loanNotes').value = loan.notes || '';
+  document.getElementById('loanFormTitle').textContent = `Editar empréstimo de ${loan.person}`;
+  document.getElementById('saveLoanBtn').textContent = 'Salvar alterações';
+  document.getElementById('cancelLoanEditBtn').hidden = false;
+  document.getElementById('loanPerson').focus();
+}
+
+function deleteLoan(id) {
+  const loan = loans.find(item => item.id === id);
+  if (!loan || !confirm(`Excluir o registro de ${loan.person} e todo o histórico de pagamentos?`)) return;
+  loans = loans.filter(item => item.id !== id);
+  if (editingLoanId === id) resetLoanForm();
+  saveData();
+  renderLoans();
+  showToast('Registro removido', 'warning');
+}
+
+function openLoanPaymentModal(id) {
+  const loan = loans.find(item => item.id === id);
+  if (!loan) return;
+  const balance = getLoanBalance(loan);
+  if (balance <= 0) return showToast('Este valor já foi totalmente recebido', 'info');
+  payingLoanId = id;
+  document.getElementById('loanPaymentPerson').textContent = loan.person;
+  document.getElementById('loanPaymentBalance').textContent = `Falta receber R$ ${fmt(balance)}`;
+  document.getElementById('loanPaymentAmount').value = '';
+  document.getElementById('loanPaymentAmount').placeholder = fmt(balance);
+  document.getElementById('loanPaymentDate').value = getTodayStr();
+  document.getElementById('loanPaymentNotes').value = '';
+  document.getElementById('loanPaymentModal').classList.add('open');
+  document.getElementById('loanPaymentAmount').focus();
+}
+
+function closeLoanPaymentModal() {
+  payingLoanId = null;
+  document.getElementById('loanPaymentModal')?.classList.remove('open');
+}
+
+function saveLoanPayment() {
+  const loan = loans.find(item => item.id === payingLoanId);
+  if (!loan) return closeLoanPaymentModal();
+  const amount = parseAmount(document.getElementById('loanPaymentAmount')?.value);
+  const date = document.getElementById('loanPaymentDate')?.value || getTodayStr();
+  const notes = document.getElementById('loanPaymentNotes')?.value.trim() || '';
+  const balance = getLoanBalance(loan);
+  if (amount <= 0) return showToast('Informe o valor recebido', 'error');
+  if (amount > balance) return showToast(`O pagamento não pode ultrapassar R$ ${fmt(balance)}`, 'error');
+  loan.payments = loan.payments || [];
+  loan.payments.push({ id: uid(), amount, date, notes, createdAt: new Date().toISOString() });
+  loan.updatedAt = new Date().toISOString();
+  saveData();
+  closeLoanPaymentModal();
+  renderLoans();
+  showToast(getLoanBalance(loan) === 0 ? 'Dívida quitada ✓' : 'Pagamento registrado ✓', 'success');
+}
+
+function deleteLoanPayment(loanId, paymentId) {
+  const loan = loans.find(item => item.id === loanId);
+  if (!loan || !confirm('Excluir este pagamento do histórico?')) return;
+  loan.payments = (loan.payments || []).filter(payment => payment.id !== paymentId);
+  saveData();
+  renderLoans();
+  showToast('Pagamento removido', 'warning');
+}
+
+function renderLoans() {
+  const list = document.getElementById('loansList');
+  if (!list) return;
+  const totalLent = loans.reduce((sum, loan) => sum + Number(loan.amount || 0), 0);
+  const totalReceived = loans.reduce((sum, loan) => sum + getLoanPaid(loan), 0);
+  const outstanding = loans.reduce((sum, loan) => sum + getLoanBalance(loan), 0);
+  const peopleOpen = loans.filter(loan => getLoanBalance(loan) > 0).length;
+  document.getElementById('loanTotalLent').textContent = `R$ ${fmt(totalLent)}`;
+  document.getElementById('loanTotalReceived').textContent = `R$ ${fmt(totalReceived)}`;
+  document.getElementById('loanOutstanding').textContent = `R$ ${fmt(outstanding)}`;
+  document.getElementById('loanPeopleOpen').textContent = String(peopleOpen);
+
+  const statusFilter = document.getElementById('loanStatusFilter')?.value || 'all';
+  const search = document.getElementById('loanSearch')?.value.trim().toLowerCase() || '';
+  const filtered = loans
+    .filter(loan => statusFilter === 'all' || getLoanStatus(loan) === statusFilter)
+    .filter(loan => !search || loan.person.toLowerCase().includes(search) || String(loan.notes || '').toLowerCase().includes(search))
+    .sort((a, b) => (a.dueDate || '9999-12-31').localeCompare(b.dueDate || '9999-12-31'));
+
+  if (!filtered.length) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">🤝</div><p>${loans.length ? 'Nenhum registro corresponde ao filtro.' : 'Você ainda não registrou nenhum valor emprestado.'}</p></div>`;
+    return;
+  }
+
+  const statusLabels = { open: 'A receber', overdue: 'Atrasado', paid: 'Quitado' };
+  list.innerHTML = filtered.map(loan => {
+    const paid = getLoanPaid(loan);
+    const balance = getLoanBalance(loan);
+    const progress = loan.amount > 0 ? Math.min(100, paid / loan.amount * 100) : 0;
+    const status = getLoanStatus(loan);
+    const payments = [...(loan.payments || [])].sort((a,b) => b.date.localeCompare(a.date));
+    return `<article class="loan-card loan-${status}">
+      <div class="loan-card-head"><div class="loan-avatar">${escapeHTML(loan.person.slice(0,2).toUpperCase())}</div><div class="loan-person"><strong>${escapeHTML(loan.person)}</strong><span>Emprestado em ${formatDateBR(loan.loanDate)}</span></div><span class="loan-status">${statusLabels[status]}</span></div>
+      <div class="loan-values"><div><span>Valor original</span><strong>R$ ${fmt(loan.amount)}</strong></div><div><span>Já recebido</span><strong>R$ ${fmt(paid)}</strong></div><div class="loan-balance"><span>Falta receber</span><strong>R$ ${fmt(balance)}</strong></div></div>
+      <div class="loan-progress"><div style="width:${progress}%"></div></div>
+      <div class="loan-meta"><span>📅 ${loan.dueDate ? `Vence em ${formatDateBR(loan.dueDate)}` : 'Sem vencimento'}</span>${loan.notes ? `<span>📝 ${escapeHTML(loan.notes)}</span>` : ''}</div>
+      ${payments.length ? `<details class="loan-history"><summary>${payments.length} pagamento${payments.length > 1 ? 's' : ''} recebido${payments.length > 1 ? 's' : ''}</summary>${payments.map(payment => `<div><span>${formatDateBR(payment.date)}${payment.notes ? ` · ${escapeHTML(payment.notes)}` : ''}</span><strong>R$ ${fmt(payment.amount)}</strong><button onclick="deleteLoanPayment('${loan.id}','${payment.id}')" aria-label="Excluir pagamento">×</button></div>`).join('')}</details>` : ''}
+      <div class="loan-actions">${balance > 0 ? `<button class="btn btn-primary btn-sm" onclick="openLoanPaymentModal('${loan.id}')">Registrar pagamento</button>` : ''}<button class="btn btn-ghost btn-sm" onclick="editLoan('${loan.id}')">Editar</button><button class="icon-danger" onclick="deleteLoan('${loan.id}')" aria-label="Excluir empréstimo">×</button></div>
     </article>`;
   }).join('');
 }
@@ -2543,7 +2736,9 @@ function renderCards() {
     const limitMonth = selection.mode === 'day'
       ? periodValue.slice(0, 7)
       : selection.mode === 'month' ? periodValue : getCurrentMonthStr();
-    const invoiceAmount = getCardInvoiceTotal(c.id, limitMonth);
+    const transactionInvoiceAmount = getCardTransactionsTotal(c.id, limitMonth);
+    const manualInvoiceAmount = getCardManualTotal(c.id, limitMonth);
+    const invoiceAmount = transactionInvoiceAmount + manualInvoiceAmount;
 
     // Parcelas futuras após a fatura usada no cálculo do limite.
     const futureTxs = transactions.filter(t =>
@@ -2580,6 +2775,8 @@ function renderCards() {
           </div>
           ${manualPeriodAmount > 0 ? `<div class="cc-stat-row cc-manual-row"><span>Inclui ajuste manual</span><span>R$ ${fmt(manualPeriodAmount)}</span></div>` : ''}
           ${pendingHtml}
+          <div class="cc-stat-row cc-limit-breakdown"><span>Usado do limite</span><strong>R$ ${fmt(limitSpent)}</strong></div>
+          ${manualInvoiceAmount > 0 ? `<div class="cc-stat-row cc-manual-limit"><span>Valor manual descontado</span><strong>− R$ ${fmt(manualInvoiceAmount)}</strong></div>` : ''}
           <div class="cc-stat-row">
             <span class="cc-stat-label">Limite Disponível${selection.mode === 'year' ? ' (atual)' : ''}</span>
             <span class="cc-val-total" style="color: ${limitSpent >= c.limit ? 'var(--red)' : 'var(--green)'}">R$ ${fmt(Math.max(0, c.limit - limitSpent))} / R$ ${fmt(c.limit)}</span>
