@@ -308,8 +308,14 @@
       <a class="nav-item" data-section="transactions" href="#">
         <span class="nav-icon">🧾</span> Transações
       </a>
+      <a class="nav-item" data-section="fixedExpenses" href="#">
+        <span class="nav-icon">📌</span> Despesas Fixas
+      </a>
       <a class="nav-item" data-section="cards" href="#">
         <span class="nav-icon">💳</span> Cartões
+      </a>
+      <a class="nav-item" data-section="invoices" href="#">
+        <span class="nav-icon">🧮</span> Faturas
       </a>
       <a class="nav-item" data-section="budgets" href="#">
         <span class="nav-icon">🎯</span> Orçamentos
@@ -426,6 +432,12 @@
             <div class="kpi-value" id="kpiSavings">0%</div>
             <div class="kpi-sub">do total de entradas</div>
           </div>
+          <div class="kpi-card invoices">
+            <div class="kpi-icon">💳</div>
+            <div class="kpi-label" id="kpiInvoicesLabel">Faturas no mês</div>
+            <div class="kpi-value" id="kpiInvoices">R$ 0,00</div>
+            <div class="kpi-sub" id="kpiInvoicesSub">transações + ajustes manuais</div>
+          </div>
         </div>
 
         <!-- CHARTS ROW -->
@@ -534,6 +546,36 @@
         </div>
       </section>
 
+      <!-- ═══ FIXED EXPENSES ═══ -->
+      <section id="sec-fixedExpenses" class="section">
+        <div class="section-header">
+          <div>
+            <span class="section-eyebrow">Cobranças automáticas</span>
+            <h1 class="section-title">Despesas Fixas</h1>
+          </div>
+          <div class="section-total"><span>Total ativo por mês</span><strong id="fixedExpensesSummary">R$ 0,00 por mês</strong></div>
+        </div>
+        <div class="feature-layout">
+          <div class="card feature-form-card">
+            <div class="card-header"><h3 id="fixedFormTitle">Nova despesa fixa</h3></div>
+            <div class="feature-form">
+              <label class="form-group full"><span class="form-label">Descrição</span><input id="fixedDesc" class="form-input" placeholder="Ex: Aluguel, internet, academia"></label>
+              <div class="form-grid">
+                <label class="form-group"><span class="form-label">Valor mensal</span><input id="fixedAmount" class="form-input" inputmode="decimal" placeholder="0,00"></label>
+                <label class="form-group"><span class="form-label">Dia da cobrança</span><input id="fixedChargeDay" class="form-input" type="number" min="1" max="31" value="1"></label>
+                <label class="form-group"><span class="form-label">Começar em</span><input id="fixedStartMonth" class="form-input" type="month"></label>
+                <label class="form-group"><span class="form-label">Categoria</span><select id="fixedCategory" class="form-input"></select></label>
+                <label class="form-group"><span class="form-label">Pagamento</span><select id="fixedPayment" class="form-input" onchange="toggleFixedCardField()"><option value="pix">Pix</option><option value="debito">Débito</option><option value="credito">Cartão de crédito</option><option value="dinheiro">Dinheiro</option><option value="transferencia">Transferência</option></select></label>
+                <label class="form-group" id="fixedCardGroup" hidden><span class="form-label">Cartão</span><select id="fixedCard" class="form-input"></select></label>
+              </div>
+              <p class="form-hint">Uma cobrança será criada automaticamente em cada mês, sem duplicar lançamentos.</p>
+              <div class="feature-form-actions"><button class="btn btn-ghost" id="cancelFixedExpenseBtn" hidden onclick="resetFixedExpenseForm()">Cancelar</button><button class="btn btn-primary" id="saveFixedExpenseBtn" onclick="saveFixedExpense()">Adicionar despesa</button></div>
+            </div>
+          </div>
+          <div class="card feature-list-card"><div class="card-header"><h3>Despesas cadastradas</h3></div><div id="fixedExpensesList"></div></div>
+        </div>
+      </section>
+
       <!-- ═══ CARDS ═══ -->
       <section id="sec-cards" class="section">
         <div class="section-header">
@@ -561,6 +603,28 @@
         </div>
 
         <div id="cardsGrid" class="cards-grid"></div>
+      </section>
+
+      <!-- ═══ INVOICES ═══ -->
+      <section id="sec-invoices" class="section">
+        <div class="section-header">
+          <div><span class="section-eyebrow">Conferência mensal</span><h1 class="section-title">Faturas</h1></div>
+          <div class="period-filter" data-period-filter="invoices">
+            <div class="period-mode-control"><span class="period-label">Visualizar por</span><div class="period-tabs" role="group" aria-label="Período das faturas"><button type="button" data-period-mode="day" aria-pressed="false">Dia</button><button type="button" data-period-mode="month" aria-pressed="true">Mês</button><button type="button" data-period-mode="year" aria-pressed="false">Ano</button></div><input type="hidden" id="invoicesPeriodMode" value="month"></div>
+            <label class="period-control"><span>Data selecionada</span><input type="date" id="invoicesDate" class="filter-input period-value" data-mode="day"><input type="month" id="invoicesMonth" class="filter-input period-value" data-mode="month"><select id="invoicesYear" class="filter-input period-value" data-mode="year"></select></label>
+          </div>
+        </div>
+        <div class="invoice-hero">
+          <div><span>Total das faturas no período</span><strong id="invoicePeriodTotal">R$ 0,00</strong><small>Soma das transações de crédito e dos valores manuais</small></div>
+          <div class="invoice-entry">
+            <label><span>Cartão</span><select id="invoiceCard" class="form-input"></select></label>
+            <label><span>Mês</span><input id="invoiceEntryMonth" type="month" class="form-input"></label>
+            <label><span>Valor manual adicional</span><input id="invoiceAmount" inputmode="decimal" class="form-input" placeholder="0,00"></label>
+            <button class="btn btn-primary" onclick="saveInvoiceAdjustment()">Salvar valor</button>
+          </div>
+        </div>
+        <p class="invoice-note">Use somente o valor que faltou lançar. O total final será: transações cadastradas + valor manual.</p>
+        <div id="invoiceGrid" class="invoice-grid"></div>
       </section>
 
       <!-- ═══ BUDGETS ═══ -->
