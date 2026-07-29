@@ -467,14 +467,25 @@ function getInvoiceMonthsForPeriod(prefix) {
   return [normalizeMonth(mode === 'day' ? value.slice(0, 7) : value)];
 }
 
+function getManualInvoiceTotalForMonths(months) {
+  const normalizedMonths = months instanceof Set
+    ? months
+    : new Set(months.map(normalizeMonth));
+  return cardInvoiceAdjustments
+    .filter(item => normalizedMonths.has(normalizeMonth(item.month)))
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+}
+
+function getManualInvoiceTotal(prefix) {
+  return getManualInvoiceTotalForMonths(getInvoiceMonthsForPeriod(prefix));
+}
+
 function getAllCardsInvoiceTotal(prefix) {
   const months = new Set(getInvoiceMonthsForPeriod(prefix));
   const transactionTotal = transactions
     .filter(transaction => isCreditTransaction(transaction) && months.has(normalizeMonth(transaction.date)))
     .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
-  const manualTotal = cardInvoiceAdjustments
-    .filter(item => months.has(normalizeMonth(item.month)))
-    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const manualTotal = getManualInvoiceTotalForMonths(months);
   return transactionTotal + manualTotal;
 }
 
@@ -1467,7 +1478,9 @@ function getPeriodTransactions() {
 function renderDashboardKPIs() {
   const txs = getPeriodTransactions();
   const income  = txs.filter(t => t.type === 'income').reduce((s,t) => s+t.amount, 0);
-  const expense = txs.filter(t => t.type === 'expense').reduce((s,t) => s+t.amount, 0);
+  const transactionExpense = txs.filter(t => t.type === 'expense').reduce((s,t) => s+t.amount, 0);
+  const manualInvoiceExpense = getManualInvoiceTotal('dash');
+  const expense = transactionExpense + manualInvoiceExpense;
   const balance = income - expense;
   const savings = income > 0 ? ((income - expense) / income * 100) : 0;
   const invoiceTotal = getAllCardsInvoiceTotal('dash');
@@ -1481,7 +1494,10 @@ function renderDashboardKPIs() {
   document.getElementById('kpiInvoicesLabel').textContent = invoiceMode === 'year' ? 'Faturas no ano' : 'Faturas no mês';
   document.getElementById('kpiInvoicesSub').textContent = 'transações + ajustes manuais';
   document.getElementById('kpiIncomeSub').textContent  = `${txs.filter(t=>t.type==='income').length} transações`;
-  document.getElementById('kpiExpenseSub').textContent = `${txs.filter(t=>t.type==='expense').length} transações`;
+  const expenseCount = txs.filter(t=>t.type==='expense').length;
+  document.getElementById('kpiExpenseSub').textContent = manualInvoiceExpense > 0
+    ? `${expenseCount} transações + faturas manuais`
+    : `${expenseCount} transações`;
   document.getElementById('kpiBalance').style.color  = balance >= 0 ? 'var(--green)' : 'var(--red)';
 
   const sideBalance = document.getElementById('sidebarBalance');
@@ -1507,7 +1523,8 @@ function renderMonthlyChart() {
     months.push(d.toLocaleString('pt-BR', { month:'short' }));
     const mTxs = transactions.filter(t => t.date?.startsWith(m));
     incomes.push(mTxs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0));
-    expenses.push(mTxs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0));
+    const transactionExpense = mTxs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+    expenses.push(transactionExpense + getManualInvoiceTotalForMonths([m]));
   }
 
   const ctx = document.getElementById('chartMonthly').getContext('2d');
@@ -1529,6 +1546,8 @@ function renderCategoryChart() {
   const exp = getPeriodTransactions().filter(t => t.type==='expense');
   const catTotals = {};
   exp.forEach(t => { catTotals[t.cat] = (catTotals[t.cat]||0) + t.amount; });
+  const manualInvoiceExpense = getManualInvoiceTotal('dash');
+  if (manualInvoiceExpense > 0) catTotals.other = (catTotals.other || 0) + manualInvoiceExpense;
 
   const sorted = Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).slice(0,7);
   const total = sorted.reduce((s,[,v])=>s+v,0);
