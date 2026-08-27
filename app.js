@@ -319,7 +319,6 @@ function finishInit() {
   processRecurringTransactions();
   processFixedExpenses();
   navigate('dashboard');
-  if (!currentUser) loadDemoDataIfEmpty();
 }
 
 function processRecurringTransactions() {
@@ -560,6 +559,18 @@ function useGuestMode() {
 
 function logout() {
   localStorage.removeItem('ff_guest_mode');
+  transactions = [];
+  budgets = [];
+  goals = [];
+  fixedExpenses = [];
+  cardInvoiceAdjustments = [];
+  loans = [];
+  localStorage.removeItem('ff_transactions');
+  localStorage.removeItem('ff_budgets');
+  localStorage.removeItem('ff_goals');
+  localStorage.removeItem('ff_fixed_expenses');
+  localStorage.removeItem('ff_card_invoice_adjustments');
+  localStorage.removeItem('ff_loans');
   if (auth) {
     auth.signOut().then(() => {
       document.getElementById('loginOverlay').style.display = 'flex';
@@ -601,11 +612,25 @@ function loadDataFromFirebase() {
       localStorage.setItem('ff_goals',         JSON.stringify(goals));
       localStorage.setItem('ff_fixed_expenses', JSON.stringify(fixedExpenses));
       localStorage.setItem('ff_card_invoice_adjustments', JSON.stringify(cardInvoiceAdjustments));
+      // If user account only contains legacy auto-generated demo data, clean it up
+      if (hasOnlyDemoData(transactions)) {
+        transactions = [];
+        budgets = [];
+        saveData();
+      }
+
       localStorage.setItem('ff_loans', JSON.stringify(loans));
     } else {
        if (isInitialSync) {
-         loadData(); 
-         loadDemoDataIfEmpty();
+         // New user entered with Google: start 100% clean with NO demo/example data!
+         transactions = [];
+         budgets = [];
+         categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+         customCards = JSON.parse(JSON.stringify(DEFAULT_CARDS));
+         goals = [];
+         fixedExpenses = [];
+         cardInvoiceAdjustments = [];
+         loans = [];
          saveData();
        }
     }
@@ -661,8 +686,20 @@ function saveData() {
   }
 }
 
-// ── DEMO DATA ────────────────────────────────────
+// ── DEMO DATA HELPERS ────────────────────────────
+function hasOnlyDemoData(txs) {
+  if (!txs || txs.length === 0) return false;
+  const demoDescriptions = [
+    'salário', 'freelance design', 'supermercado', 'aluguel',
+    'conta de luz', 'uber', 'netflix + spotify', 'farmácia',
+    'farmacia', 'roupa c&a', 'restaurante', 'gastos gerais'
+  ];
+  return txs.every(t => demoDescriptions.includes((t.desc || '').toLowerCase().trim()));
+}
+
 function loadDemoDataIfEmpty() {
+  // Intentionally disabled: accounts should start clean without demo/example values
+  return;
   if (transactions.length > 0) return;
   const now = new Date();
   const m = now.toISOString().slice(0,7);
@@ -1566,7 +1603,10 @@ function renderCategoryChart() {
   });
 
   const leg = document.getElementById('categoryLegend');
-  leg.innerHTML = sorted.map(([k,v])=>{
+  if (sorted.length === 0) {
+    leg.innerHTML = '<p style="color:var(--text3);font-size:12px;text-align:center;padding:12px 0;">Nenhuma despesa no período</p>';
+  } else {
+    leg.innerHTML = sorted.map(([k,v])=> {
     const cat = getCat(k);
     const pct = total > 0 ? (v/total*100).toFixed(0) : 0;
     return `<div class="legend-item">
@@ -1575,6 +1615,7 @@ function renderCategoryChart() {
       <span class="legend-pct">${pct}%</span>
     </div>`;
   }).join('');
+  }
 }
 
 function renderBudgetOverview() {
