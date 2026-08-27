@@ -269,6 +269,7 @@ let selectedIds = new Set();
 
 // ── INIT ─────────────────────────────────────────
 function init() {
+  initTheme();
   if (auth) {
     auth.useDeviceLanguage();
     auth.getRedirectResult().then(result => {
@@ -308,6 +309,7 @@ function init() {
 
 function finishInit() {
   document.getElementById('loginOverlay').style.display = 'none';
+  initTheme();
   buildCategorySelects();
   buildCardSelector();
   setDefaultDate();
@@ -1675,8 +1677,8 @@ function txItemHTML(t, showActions=false) {
     : `onclick="openModal('${t.id}')"`;
 
   const actions = showActions ? `<div class="tx-actions">
-    <button class="tx-btn" onclick="event.stopPropagation();openModal('${t.id}')" title="Editar">✏️</button>
-    <button class="tx-btn" onclick="event.stopPropagation();deleteTransaction('${t.id}')" title="Excluir">🗑</button>
+    <button class="tx-btn" onclick="event.stopPropagation();openModal('${t.id}')" title="Editar"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+    <button class="tx-btn" onclick="event.stopPropagation();deleteTransaction('${t.id}')" title="Excluir"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
   </div>` : '';
 
   const checkbox = showActions
@@ -2340,16 +2342,115 @@ function handleImportJSON(event) {
   event.target.value = '';
 }
 
+// ── THEME MANAGEMENT ─────────────────────────────
+function isDarkTheme() {
+  return document.documentElement.getAttribute('data-theme') !== 'light';
+}
+
+function initTheme() {
+  try {
+    const savedTheme = localStorage.getItem('ff_theme') || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    setTheme(savedTheme, false);
+  } catch(e) {
+    setTheme('dark', false);
+  }
+}
+
+function toggleTheme() {
+  const next = isDarkTheme() ? 'light' : 'dark';
+  setTheme(next, true);
+}
+
+function setTheme(theme, updateCharts = true) {
+  document.documentElement.setAttribute('data-theme', theme);
+  try {
+    localStorage.setItem('ff_theme', theme);
+  } catch(e) {}
+
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) {
+    if (theme === 'light') {
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+      btn.title = "Alternar para Modo Escuro";
+    } else {
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+      btn.title = "Alternar para Modo Claro";
+    }
+  }
+
+  const sidebarIcon = document.getElementById('sidebarThemeIcon');
+  const sidebarLabel = document.getElementById('sidebarThemeLabel');
+  if (sidebarLabel) {
+    sidebarLabel.textContent = theme === 'light' ? 'Modo Escuro' : 'Modo Claro';
+  }
+  if (sidebarIcon) {
+    if (theme === 'light') {
+      sidebarIcon.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+    } else {
+      sidebarIcon.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+    }
+  }
+
+  if (updateCharts) {
+    const sec = currentSection();
+    if (sec === 'dashboard') {
+      renderMonthlyChart();
+      renderCategoryChart();
+    } else if (sec === 'reports') {
+      renderAnnualChart();
+      renderTopCatChart();
+      renderTrendChart();
+    }
+  }
+}
+
 // ── CHART DEFAULTS ───────────────────────────────
 function chartOpts() {
+  const dark = isDarkTheme();
   return {
-    responsive:true, maintainAspectRatio:false,
-    animation:{ duration:500 },
-    plugins:{ legend:{ labels:{ color:'#8b8fa8', font:{ family:'Inter', size:12 }, boxWidth:12, usePointStyle:true } }, tooltip:{ backgroundColor:'#1e2029', titleColor:'#e8eaf0', bodyColor:'#8b8fa8', borderColor:'#2a2d3a', borderWidth:1, padding:10, callbacks:{ label:ctx=>`R$ ${fmt(ctx.parsed.y ?? ctx.parsed)}` } } }
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 400 },
+    plugins: {
+      legend: {
+        labels: {
+          color: dark ? '#94a3b8' : '#475569',
+          font: { family: 'Inter', size: 12, weight: '500' },
+          boxWidth: 12,
+          usePointStyle: true
+        }
+      },
+      tooltip: {
+        backgroundColor: dark ? '#182236' : '#ffffff',
+        titleColor: dark ? '#f8fafc' : '#0f172a',
+        bodyColor: dark ? '#94a3b8' : '#475569',
+        borderColor: dark ? '#2a3a58' : '#e2e8f0',
+        borderWidth: 1,
+        padding: 12,
+        cornerRadius: 10,
+        boxPadding: 6,
+        usePointStyle: true,
+        callbacks: { label: ctx => `R$ ${fmt(ctx.parsed.y ?? ctx.parsed)}` }
+      }
+    }
   };
 }
-function scaleOpts() { return { grid:{ color:'rgba(255,255,255,.04)' }, border:{ display:false } }; }
-function ticksOpts() { return { color:'#4a4d62', font:{ family:'Inter', size:11 } }; }
+
+function scaleOpts() {
+  const dark = isDarkTheme();
+  return {
+    grid: { color: dark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.06)' },
+    border: { display: false }
+  };
+}
+
+function ticksOpts() {
+  const dark = isDarkTheme();
+  return {
+    color: dark ? '#64748b' : '#94a3b8',
+    font: { family: 'Inter', size: 11, weight: '500' }
+  };
+}
 
 // ── HELPERS ──────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -2822,7 +2923,7 @@ function renderCards() {
             <span class="cc-val-total" style="color: ${limitSpent >= c.limit ? 'var(--red)' : 'var(--green)'}">R$ ${fmt(Math.max(0, c.limit - limitSpent))} / R$ ${fmt(c.limit)}</span>
           </div>
           <div class="cc-stat-row">
-            <div class="budget-bar" style="background: rgba(255,255,255,0.05); height: 6px;">
+            <div class="budget-bar" style="background: var(--surface3); height: 6px;">
               <div class="budget-bar-fill" style="width: ${limitPct}%; background: ${c.color}"></div>
             </div>
           </div>
