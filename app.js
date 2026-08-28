@@ -1020,6 +1020,18 @@ async function syncAllToSupabase() {
       }));
       await sbClient.from('custom_categories').upsert(catRows, { onConflict: 'id,user_id' });
     }
+
+    // Sincronizar ajustes/valores manuais de faturas de cartão
+    if (cardInvoiceAdjustments.length > 0) {
+      const adjRows = cardInvoiceAdjustments.map(a => ({
+        id: a.id,
+        user_id: userId,
+        card_id: a.cardId,
+        month: a.month,
+        amount: Number(a.amount || 0)
+      }));
+      await sbClient.from('card_invoice_adjustments').upsert(adjRows, { onConflict: 'id,user_id' });
+    }
   } catch (err) {
     console.error('Erro na sincronização com Supabase:', err);
   }
@@ -2450,6 +2462,10 @@ function deleteCustomCard(id) {
   if (editingCardId === id) resetCustomCardForm();
   customCards = customCards.filter(c => c.id !== id);
   cardInvoiceAdjustments = cardInvoiceAdjustments.filter(item => item.cardId !== id);
+  if (sbClient && currentUser && currentUser.id !== 'guest_user') {
+    sbClient.from('custom_cards').delete().eq('id', id).eq('user_id', currentUser.id).then();
+    sbClient.from('card_invoice_adjustments').delete().eq('card_id', id).eq('user_id', currentUser.id).then();
+  }
   saveData();
   buildCardSelector();
   renderSettings();
@@ -2525,7 +2541,8 @@ function clearAllData() {
       sbClient.from('budgets').delete().eq('user_id', uid),
       sbClient.from('goals').delete().eq('user_id', uid),
       sbClient.from('custom_cards').delete().eq('user_id', uid),
-      sbClient.from('custom_categories').delete().eq('user_id', uid)
+      sbClient.from('custom_categories').delete().eq('user_id', uid),
+      sbClient.from('card_invoice_adjustments').delete().eq('user_id', uid)
     ]).then(() => location.reload()).catch(() => location.reload());
   } else {
     location.reload();
@@ -3178,6 +3195,9 @@ function saveInvoiceAdjustment() {
 
 function deleteInvoiceAdjustment(id) {
   cardInvoiceAdjustments = cardInvoiceAdjustments.filter(item => item.id !== id);
+  if (sbClient && currentUser && currentUser.id !== 'guest_user') {
+    sbClient.from('card_invoice_adjustments').delete().eq('id', id).eq('user_id', currentUser.id).then();
+  }
   saveData();
   renderInvoices();
   renderCards();
