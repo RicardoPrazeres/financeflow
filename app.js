@@ -725,67 +725,71 @@ async function loadDataFromSupabase() {
   try {
     const userId = currentUser.id;
 
+    // Carregar tabelas de forma robusta e independente
     const [
-      { data: txsData, error: txsErr },
-      { data: catsData },
-      { data: cardsData },
-      { data: feData },
-      { data: loansData },
-      { data: budgetsData },
-      { data: goalsData },
-      { data: adjData }
+      txsRes,
+      catsRes,
+      cardsRes,
+      feRes,
+      loansRes,
+      payRes,
+      budgetsRes,
+      goalsRes,
+      adjRes
     ] = await Promise.all([
       sbClient.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
       sbClient.from('custom_categories').select('*').eq('user_id', userId),
       sbClient.from('custom_cards').select('*').eq('user_id', userId),
       sbClient.from('fixed_expenses').select('*').eq('user_id', userId),
-      sbClient.from('loans').select('*, loan_payments(*)').eq('user_id', userId),
+      sbClient.from('loans').select('*').eq('user_id', userId).order('loan_date', { ascending: false }),
+      sbClient.from('loan_payments').select('*').eq('user_id', userId),
       sbClient.from('budgets').select('*').eq('user_id', userId),
       sbClient.from('goals').select('*').eq('user_id', userId),
       sbClient.from('card_invoice_adjustments').select('*').eq('user_id', userId)
     ]);
 
-    if (txsErr) throw txsErr;
-
-    transactions = (txsData || []).map(t => ({
-      id: t.id,
-      type: t.type,
-      desc: t.description,
-      amount: Number(t.amount || 0),
-      date: t.date,
-      cat: t.category,
-      payment: t.payment_method || 'outro',
-      notes: t.notes || '',
-      recurring: Boolean(t.recurring),
-      cardKey: t.card_key || null,
-      cardLabel: t.card_label || null,
-      invoiceMonth: t.invoice_month || null,
-      installments: t.installments ? Number(t.installments) : null,
-      installmentPaid: t.installment_paid ? Number(t.installment_paid) : null,
-      installmentValue: t.installment_value ? Number(t.installment_value) : null,
-      installmentTotal: t.installment_total ? Number(t.installment_total) : null,
-      installmentGroupId: t.installment_group_id || null,
-      fixedExpenseId: t.fixed_expense_id || null,
-      fixedExpenseMonth: t.fixed_expense_month || null,
-      createdAt: t.created_at
-    }));
-
-    if (hasOnlyDemoData(transactions)) {
-      transactions = [];
-      budgets = [];
-      saveData();
+    // Transações: atualizar se a consulta retornou com sucesso
+    if (txsRes.data && !txsRes.error) {
+      if (txsRes.data.length > 0 || transactions.length === 0) {
+        transactions = txsRes.data.map(t => ({
+          id: t.id,
+          type: t.type,
+          desc: t.description,
+          amount: Number(t.amount || 0),
+          date: t.date,
+          cat: t.category,
+          payment: t.payment_method || 'outro',
+          notes: t.notes || '',
+          recurring: Boolean(t.recurring),
+          cardKey: t.card_key || null,
+          cardLabel: t.card_label || null,
+          invoiceMonth: t.invoice_month || null,
+          installments: t.installments ? Number(t.installments) : null,
+          installmentPaid: t.installment_paid ? Number(t.installment_paid) : null,
+          installmentValue: t.installment_value ? Number(t.installment_value) : null,
+          installmentTotal: t.installment_total ? Number(t.installment_total) : null,
+          installmentGroupId: t.installment_group_id || null,
+          fixedExpenseId: t.fixed_expense_id || null,
+          fixedExpenseMonth: t.fixed_expense_month || null,
+          createdAt: t.created_at
+        }));
+      }
     }
 
-    const customCats = (catsData || []).map(c => ({
-      id: c.id,
-      name: c.name,
-      emoji: c.emoji || '📦',
-      color: c.color || '#6b7280'
-    }));
-    categories = [...DEFAULT_CATEGORIES, ...customCats];
+    // Categorias
+    if (catsRes.data && !catsRes.error) {
+      const customCats = catsRes.data.map(c => ({
+        id: c.id,
+        name: c.name,
+        emoji: c.emoji || '📦',
+        color: c.color || '#6b7280'
+      }));
+      categories = [...DEFAULT_CATEGORIES, ...customCats];
+    }
 
-    if (cardsData && cardsData.length > 0) {
-      customCards = cardsData.map(c => ({
+    // Cartões
+    if (cardsRes.data && !cardsRes.error && cardsRes.data.length > 0) {
+      customCards = cardsRes.data.map(c => ({
         id: c.id,
         name: c.name,
         initials: c.initials,
@@ -794,68 +798,99 @@ async function loadDataFromSupabase() {
         closingDay: c.closing_day,
         dueDay: c.due_day
       }));
-    } else {
-      customCards = JSON.parse(JSON.stringify(DEFAULT_CARDS));
     }
 
-    fixedExpenses = (feData || []).map(f => ({
-      id: f.id,
-      desc: f.description,
-      amount: Number(f.amount || 0),
-      chargeDay: Number(f.charge_day || 1),
-      startMonth: f.start_month,
-      cat: f.category,
-      payment: f.payment_method,
-      cardKey: f.card_key || null,
-      active: f.active !== false,
-      generatedMonths: f.generated_months || [],
-      createdAt: f.created_at,
-      updatedAt: f.updated_at
-    }));
+    // Despesas Fixas
+    if (feRes.data && !feRes.error) {
+      if (feRes.data.length > 0 || fixedExpenses.length === 0) {
+        fixedExpenses = feRes.data.map(f => ({
+          id: f.id,
+          desc: f.description,
+          amount: Number(f.amount || 0),
+          chargeDay: Number(f.charge_day || 1),
+          startMonth: f.start_month,
+          cat: f.category,
+          payment: f.payment_method,
+          cardKey: f.card_key || null,
+          active: f.active !== false,
+          generatedMonths: f.generated_months || [],
+          createdAt: f.created_at,
+          updatedAt: f.updated_at
+        }));
+      }
+    }
 
-    loans = (loansData || []).map(l => ({
-      id: l.id,
-      person: l.person,
-      amount: Number(l.amount || 0),
-      loanDate: l.loan_date,
-      dueDate: l.due_date || '',
-      notes: l.notes || '',
-      payments: (l.loan_payments || []).map(p => ({
-        id: p.id,
-        amount: Number(p.amount || 0),
-        date: p.payment_date,
-        notes: p.notes || '',
-        createdAt: p.created_at
-      })),
-      createdAt: l.created_at,
-      updatedAt: l.updated_at
-    }));
+    // Emprestado (Loans + Payments): sem relação PGRST200, 100% resiliente
+    if (loansRes.data && !loansRes.error) {
+      const paymentsByLoan = {};
+      if (payRes.data && !payRes.error) {
+        payRes.data.forEach(p => {
+          if (!paymentsByLoan[p.loan_id]) paymentsByLoan[p.loan_id] = [];
+          paymentsByLoan[p.loan_id].push({
+            id: p.id,
+            amount: Number(p.amount || 0),
+            date: p.payment_date,
+            notes: p.notes || '',
+            createdAt: p.created_at
+          });
+        });
+      }
 
-    budgets = (budgetsData || []).map(b => ({
-      id: b.id,
-      cat: b.category,
-      limit: Number(b.amount_limit || 0),
-      month: b.month || null,
-      createdAt: b.created_at
-    }));
+      if (loansRes.data.length > 0 || loans.length === 0) {
+        loans = loansRes.data.map(l => ({
+          id: l.id,
+          person: l.person,
+          amount: Number(l.amount || 0),
+          loanDate: l.loan_date,
+          dueDate: l.due_date || '',
+          notes: l.notes || '',
+          payments: paymentsByLoan[l.id] || [],
+          createdAt: l.created_at,
+          updatedAt: l.updated_at
+        }));
+      }
+    }
 
-    goals = (goalsData || []).map(g => ({
-      id: g.id,
-      name: g.name,
-      emoji: g.emoji || '🎯',
-      targetDate: g.target_date,
-      targetValue: Number(g.target_value || 0),
-      currentValue: Number(g.current_value || 0),
-      createdAt: g.created_at
-    }));
+    // Orçamentos (Budgets): salva dados locais caso a nuvem esteja vazia
+    if (budgetsRes.data && !budgetsRes.error) {
+      if (budgetsRes.data.length > 0 || budgets.length === 0) {
+        budgets = budgetsRes.data.map(b => ({
+          id: b.id,
+          cat: b.category,
+          limit: Number(b.amount_limit || 0),
+          month: b.month || null,
+          createdAt: b.created_at
+        }));
+      }
+    }
 
-    cardInvoiceAdjustments = (adjData || []).map(a => ({
-      id: a.id,
-      cardId: a.card_id,
-      month: a.month,
-      amount: Number(a.amount || 0),
-      createdAt: a.created_at
-    }));
+    // Metas (Goals): nunca sobrescreve com vazio se existirem metas locais
+    if (goalsRes.data && !goalsRes.error) {
+      if (goalsRes.data.length > 0 || goals.length === 0) {
+        goals = goalsRes.data.map(g => ({
+          id: g.id,
+          name: g.name,
+          emoji: g.emoji || '🎯',
+          targetDate: g.target_date,
+          targetValue: Number(g.target_value || 0),
+          currentValue: Number(g.current_value || 0),
+          createdAt: g.created_at
+        }));
+      }
+    }
+
+    // Faturas manuais (cardInvoiceAdjustments)
+    if (adjRes.data && !adjRes.error) {
+      if (adjRes.data.length > 0 || cardInvoiceAdjustments.length === 0) {
+        cardInvoiceAdjustments = adjRes.data.map(a => ({
+          id: a.id,
+          cardId: a.card_id,
+          month: a.month,
+          amount: Number(a.amount || 0),
+          createdAt: a.created_at
+        }));
+      }
+    }
 
     localStorage.setItem('ff_transactions', JSON.stringify(transactions));
     localStorage.setItem('ff_budgets', JSON.stringify(budgets));
@@ -896,156 +931,172 @@ async function syncAllToSupabase() {
   if (!sbClient || !currentUser || currentUser.id === 'guest_user') return;
   const userId = currentUser.id;
 
-  try {
-    if (transactions.length > 0) {
-      const txRows = transactions.map(t => ({
-        id: t.id,
-        user_id: userId,
-        type: t.type,
-        description: t.desc,
-        amount: Number(t.amount || 0),
-        date: t.date,
-        category: t.cat,
-        payment_method: t.payment || 'outro',
-        notes: t.notes || null,
-        recurring: Boolean(t.recurring),
-        card_key: t.cardKey || null,
-        card_label: t.cardLabel || null,
-        invoice_month: t.invoiceMonth || null,
-        installments: t.installments ? Number(t.installments) : null,
-        installment_paid: t.installmentPaid ? Number(t.installmentPaid) : null,
-        installment_value: t.installmentValue ? Number(t.installmentValue) : null,
-        installment_total: t.installmentTotal ? Number(t.installmentTotal) : null,
-        installment_group_id: t.installmentGroupId || null,
-        fixed_expense_id: t.fixedExpenseId || null,
-        fixed_expense_month: t.fixedExpenseMonth || null
-      }));
-      await sbClient.from('transactions').upsert(txRows, { onConflict: 'id,user_id' });
-    }
+  // Sincronização paralela e isolada: uma falha em uma tabela JAMAIS afeta as outras!
+  await Promise.allSettled([
+    // 1. Transações
+    (async () => {
+      if (transactions.length > 0) {
+        const txRows = transactions.map(t => ({
+          id: t.id,
+          user_id: userId,
+          type: t.type,
+          description: t.desc,
+          amount: Number(t.amount || 0),
+          date: t.date,
+          category: t.cat,
+          payment_method: t.payment || 'outro',
+          notes: t.notes || null,
+          recurring: Boolean(t.recurring),
+          card_key: t.cardKey || null,
+          card_label: t.cardLabel || null,
+          invoice_month: t.invoiceMonth || null,
+          installments: t.installments ? Number(t.installments) : null,
+          installment_paid: t.installmentPaid ? Number(t.installmentPaid) : null,
+          installment_value: t.installmentValue ? Number(t.installment_value) : null,
+          installment_total: t.installmentTotal ? Number(t.installmentTotal) : null,
+          installment_group_id: t.installmentGroupId || null,
+          fixed_expense_id: t.fixedExpenseId || null,
+          fixed_expense_month: t.fixedExpenseMonth || null
+        }));
+        await sbClient.from('transactions').upsert(txRows, { onConflict: 'id,user_id' });
+      }
+    })(),
 
-    if (fixedExpenses.length > 0) {
-      const feRows = fixedExpenses.map(f => ({
-        id: f.id,
-        user_id: userId,
-        description: f.desc,
-        amount: Number(f.amount || 0),
-        charge_day: Number(f.chargeDay || 1),
-        start_month: f.startMonth,
-        category: f.cat,
-        payment_method: f.payment,
-        card_key: f.cardKey || null,
-        active: f.active !== false,
-        generated_months: f.generatedMonths || []
-      }));
-      await sbClient.from('fixed_expenses').upsert(feRows, { onConflict: 'id,user_id' });
-    }
+    // 2. Despesas Fixas
+    (async () => {
+      if (fixedExpenses.length > 0) {
+        const feRows = fixedExpenses.map(f => ({
+          id: f.id,
+          user_id: userId,
+          description: f.desc,
+          amount: Number(f.amount || 0),
+          charge_day: Number(f.chargeDay || 1),
+          start_month: f.startMonth,
+          category: f.cat,
+          payment_method: f.payment,
+          card_key: f.cardKey || null,
+          active: f.active !== false,
+          generated_months: f.generatedMonths || []
+        }));
+        await sbClient.from('fixed_expenses').upsert(feRows, { onConflict: 'id,user_id' });
+      }
+    })(),
 
-    if (loans.length > 0) {
-      const loanRows = loans.map(l => ({
-        id: l.id,
-        user_id: userId,
-        person: l.person,
-        amount: Number(l.amount || 0),
-        loan_date: l.loanDate,
-        due_date: l.dueDate || null,
-        notes: l.notes || null
-      }));
-      await sbClient.from('loans').upsert(loanRows, { onConflict: 'id,user_id' });
+    // 3. Emprestado (Loans)
+    (async () => {
+      if (loans.length > 0) {
+        const loanRows = loans.map(l => ({
+          id: l.id,
+          user_id: userId,
+          person: l.person,
+          amount: Number(l.amount || 0),
+          loan_date: l.loanDate,
+          due_date: l.dueDate || null,
+          notes: l.notes || null
+        }));
+        await sbClient.from('loans').upsert(loanRows, { onConflict: 'id,user_id' });
 
-      const paymentRows = [];
-      loans.forEach(l => {
-        (l.payments || []).forEach(p => {
-          paymentRows.push({
-            id: p.id,
-            loan_id: l.id,
-            user_id: userId,
-            amount: Number(p.amount || 0),
-            payment_date: p.date,
-            notes: p.notes || null
+        const paymentRows = [];
+        loans.forEach(l => {
+          (l.payments || []).forEach(p => {
+            paymentRows.push({
+              id: p.id,
+              loan_id: l.id,
+              user_id: userId,
+              amount: Number(p.amount || 0),
+              payment_date: p.date,
+              notes: p.notes || null
+            });
           });
         });
-      });
-      if (paymentRows.length > 0) {
-        await sbClient.from('loan_payments').upsert(paymentRows, { onConflict: 'id,user_id' });
+        if (paymentRows.length > 0) {
+          await sbClient.from('loan_payments').upsert(paymentRows, { onConflict: 'id,user_id' });
+        }
       }
-    }
+    })(),
 
-    if (budgets.length > 0) {
-      const bRows = budgets.map(b => ({
-        id: b.id,
-        user_id: userId,
-        category: b.cat,
-        amount_limit: Number(b.limit || 0),
-        month: b.month || null
-      }));
-      await sbClient.from('budgets').upsert(bRows, { onConflict: 'id,user_id' });
-    }
+    // 4. Orçamentos (Budgets)
+    (async () => {
+      if (budgets.length > 0) {
+        const bRows = budgets.map(b => ({
+          id: b.id,
+          user_id: userId,
+          category: b.cat,
+          amount_limit: Number(b.limit || 0),
+          month: b.month || null
+        }));
+        await sbClient.from('budgets').upsert(bRows, { onConflict: 'id,user_id' });
+      }
+    })(),
 
-    if (goals.length > 0) {
-      const gRows = goals.map(g => ({
-        id: g.id,
-        user_id: userId,
-        name: g.name,
-        emoji: g.emoji || '🎯',
-        target_date: g.targetDate,
-        target_value: Number(g.targetValue || 0),
-        current_value: Number(g.currentValue || 0)
-      }));
-      await sbClient.from('goals').upsert(gRows, { onConflict: 'id,user_id' });
-    }
+    // 5. Metas (Goals)
+    (async () => {
+      if (goals.length > 0) {
+        const gRows = goals.map(g => ({
+          id: g.id,
+          user_id: userId,
+          name: g.name,
+          emoji: g.emoji || '🎯',
+          target_date: g.targetDate,
+          target_value: Number(g.targetValue || 0),
+          current_value: Number(g.currentValue || 0)
+        }));
+        await sbClient.from('goals').upsert(gRows, { onConflict: 'id,user_id' });
+      }
+    })(),
 
-    if (customCards.length > 0) {
-      const cardRows = customCards.map(c => ({
-        id: c.id,
-        user_id: userId,
-        name: c.name,
-        initials: c.initials || 'CC',
-        color: c.color,
-        card_limit: Number(c.limit || 0),
-        closing_day: c.closingDay || null,
-        due_day: c.dueDay || null
-      }));
-      await sbClient.from('custom_cards').upsert(cardRows, { onConflict: 'id,user_id' });
-    }
+    // 6. Cartões
+    (async () => {
+      if (customCards.length > 0) {
+        const cardRows = customCards.map(c => ({
+          id: c.id,
+          user_id: userId,
+          name: c.name,
+          initials: c.initials || 'CC',
+          color: c.color,
+          card_limit: Number(c.limit || 0),
+          closing_day: c.closingDay || null,
+          due_day: c.dueDay || null
+        }));
+        await sbClient.from('custom_cards').upsert(cardRows, { onConflict: 'id,user_id' });
+      }
+    })(),
 
-    const defaultIds = new Set(DEFAULT_CATEGORIES.map(c => c.id));
-    const userCustomCats = categories.filter(c => !defaultIds.has(c.id));
-    if (userCustomCats.length > 0) {
-      const catRows = userCustomCats.map(c => ({
-        id: c.id,
-        user_id: userId,
-        name: c.name,
-        emoji: c.emoji || '📦',
-        color: c.color || '#6b7280'
-      }));
-      await sbClient.from('custom_categories').upsert(catRows, { onConflict: 'id,user_id' });
-    }
+    // 7. Categorias customizadas
+    (async () => {
+      const defaultIds = new Set(DEFAULT_CATEGORIES.map(c => c.id));
+      const userCustomCats = categories.filter(c => !defaultIds.has(c.id));
+      if (userCustomCats.length > 0) {
+        const catRows = userCustomCats.map(c => ({
+          id: c.id,
+          user_id: userId,
+          name: c.name,
+          emoji: c.emoji || '📦',
+          color: c.color || '#6b7280'
+        }));
+        await sbClient.from('custom_categories').upsert(catRows, { onConflict: 'id,user_id' });
+      }
+    })(),
 
-    // Sincronizar ajustes/valores manuais de faturas de cartão
-    if (cardInvoiceAdjustments.length > 0) {
-      const adjRows = cardInvoiceAdjustments.map(a => ({
-        id: a.id,
-        user_id: userId,
-        card_id: a.cardId,
-        month: a.month,
-        amount: Number(a.amount || 0)
-      }));
-      await sbClient.from('card_invoice_adjustments').upsert(adjRows, { onConflict: 'id,user_id' });
-    }
-  } catch (err) {
-    console.error('Erro na sincronização com Supabase:', err);
-  }
+    // 8. Faturas manuais
+    (async () => {
+      if (cardInvoiceAdjustments.length > 0) {
+        const adjRows = cardInvoiceAdjustments.map(a => ({
+          id: a.id,
+          user_id: userId,
+          card_id: a.cardId,
+          month: a.month,
+          amount: Number(a.amount || 0)
+        }));
+        await sbClient.from('card_invoice_adjustments').upsert(adjRows, { onConflict: 'id,user_id' });
+      }
+    })()
+  ]);
 }
 
-// ── DEMO DATA HELPERS ────────────────────────────
 function hasOnlyDemoData(txs) {
-  if (!txs || txs.length === 0) return false;
-  const demoDescriptions = [
-    'salário', 'freelance design', 'supermercado', 'aluguel',
-    'conta de luz', 'uber', 'netflix + spotify', 'farmácia',
-    'farmacia', 'roupa c&a', 'restaurante', 'gastos gerais'
-  ];
-  return txs.every(t => demoDescriptions.includes((t.desc || '').toLowerCase().trim()));
+  // Desativado permanentemente: nunca apagar transações reais do usuário
+  return false;
 }
 
 function loadDemoDataIfEmpty() {
@@ -1681,6 +1732,9 @@ function saveBudget() {
 
 function deleteBudget(id) {
   budgets = budgets.filter(b => b.id !== id);
+  if (sbClient && currentUser && currentUser.id !== 'guest_user') {
+    sbClient.from('budgets').delete().eq('id', id).eq('user_id', currentUser.id).then();
+  }
   saveData();
   renderBudgets();
   checkAlerts();
@@ -1731,6 +1785,9 @@ function saveGoal() {
 function deleteGoal(id) {
   if (!confirm('Deseja excluir esta meta?')) return;
   goals = goals.filter(g => g.id !== id);
+  if (sbClient && currentUser && currentUser.id !== 'guest_user') {
+    sbClient.from('goals').delete().eq('id', id).eq('user_id', currentUser.id).then();
+  }
   saveData();
   renderGoals();
   showToast('Meta excluída', 'warning');
