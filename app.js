@@ -37,8 +37,8 @@ const SMART_RULES = [
 
 // ── SUPABASE CONFIGURATION & CLIENT ───────────────
 // Você pode preencher as credenciais padrão aqui ou direto na tela de Preferências:
-const DEFAULT_SUPABASE_URL = '';
-const DEFAULT_SUPABASE_ANON_KEY = '';
+const DEFAULT_SUPABASE_URL = 'https://cqpyhuahogktsscnebvq.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_XDwMceDyJ3_LtrYGGKygjA_Kvbj0ACW';
 
 function getSupabaseConfig() {
   const storedUrl = localStorage.getItem('ff_supabase_url');
