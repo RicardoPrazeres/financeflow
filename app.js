@@ -1144,7 +1144,7 @@ function navigate(sec) {
   document.getElementById(`sec-${sec}`).classList.add('active');
   document.querySelector(`[data-section="${sec}"]`)?.classList.add('active');
 
-  const titles = { dashboard:'Dashboard', transactions:'Transações', fixedExpenses:'Despesas Fixas', cards:'Meus Cartões', invoices:'Faturas', loans:'Emprestado', budgets:'Orçamentos', goals:'Metas', reports:'Relatórios', settings:'Preferências' };
+  const titles = { dashboard:'Dashboard', transactions:'Transações', fixedExpenses:'Despesas Fixas', cards:'Meus Cartões', invoices:'Faturas', loans:'A receber', budgets:'Orçamentos', goals:'Metas', reports:'Relatórios', settings:'Preferências' };
   document.getElementById('topbarTitle').textContent = titles[sec] || sec;
 
   closeSidebar();
@@ -1981,7 +1981,7 @@ function renderDashboardKPIs() {
   const subParts = [];
   if (fixedTotal > 0) subParts.push(`inclui R$ ${fmt(fixedTotal)} fixas`);
   if (manualInvoiceExpense > 0) subParts.push(`+ faturas`);
-  if (loanDiscount > 0) subParts.push(`− R$ ${fmt(loanDiscount)} emprestado`);
+  if (loanDiscount > 0) subParts.push(`− R$ ${fmt(loanDiscount)} a receber`);
 
   if (subParts.length > 0) {
     document.getElementById('kpiExpenseSub').textContent = `${expenseCount} txs (${subParts.join(', ')})`;
@@ -3331,8 +3331,8 @@ function resetLoanForm() {
   const title = document.getElementById('loanFormTitle');
   const button = document.getElementById('saveLoanBtn');
   const cancel = document.getElementById('cancelLoanEditBtn');
-  if (title) title.textContent = 'Novo valor emprestado';
-  if (button) button.textContent = 'Adicionar pessoa';
+  if (title) title.textContent = 'Novo valor a receber';
+  if (button) button.textContent = 'Salvar valor a receber';
   if (cancel) cancel.hidden = true;
 }
 
@@ -3361,7 +3361,7 @@ function saveLoan() {
   renderLoans();
   renderDashboardKPIs();
   if (currentSection() === 'dashboard') renderDashboard();
-  showToast(wasEditing ? 'Empréstimo atualizado ✓' : 'Valor emprestado registrado ✓', 'success');
+  showToast(wasEditing ? 'Registro atualizado ✓' : 'Valor a receber registrado ✓', 'success');
 }
 
 function editLoan(id) {
@@ -3373,7 +3373,7 @@ function editLoan(id) {
   document.getElementById('loanDate').value = loan.loanDate || getTodayStr();
   document.getElementById('loanDueDate').value = loan.dueDate || '';
   document.getElementById('loanNotes').value = loan.notes || '';
-  document.getElementById('loanFormTitle').textContent = `Editar empréstimo de ${loan.person}`;
+  document.getElementById('loanFormTitle').textContent = `Editar registro de ${loan.person}`;
   document.getElementById('saveLoanBtn').textContent = 'Salvar alterações';
   document.getElementById('cancelLoanEditBtn').hidden = false;
   document.getElementById('loanPerson').focus();
@@ -3466,7 +3466,7 @@ function renderLoans() {
     .sort((a, b) => (a.dueDate || '9999-12-31').localeCompare(b.dueDate || '9999-12-31'));
 
   if (!filtered.length) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">🤝</div><p>${loans.length ? 'Nenhum registro corresponde ao filtro.' : 'Você ainda não registrou nenhum valor emprestado.'}</p></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">🤝</div><p>${loans.length ? 'Nenhum registro corresponde ao filtro.' : 'Você ainda não registrou nenhum valor a receber.'}</p></div>`;
     return;
   }
 
@@ -3478,12 +3478,12 @@ function renderLoans() {
     const status = getLoanStatus(loan);
     const payments = [...(loan.payments || [])].sort((a,b) => b.date.localeCompare(a.date));
     return `<article class="loan-card loan-${status}">
-      <div class="loan-card-head"><div class="loan-avatar">${escapeHTML(loan.person.slice(0,2).toUpperCase())}</div><div class="loan-person"><strong>${escapeHTML(loan.person)}</strong><span>Emprestado em ${formatDateBR(loan.loanDate)}</span></div><span class="loan-status">${statusLabels[status]}</span></div>
+      <div class="loan-card-head"><div class="loan-avatar">${escapeHTML(loan.person.slice(0,2).toUpperCase())}</div><div class="loan-person"><strong>${escapeHTML(loan.person)}</strong><span>Registrado em ${formatDateBR(loan.loanDate)}</span></div><span class="loan-status">${statusLabels[status]}</span></div>
       <div class="loan-values"><div><span>Valor original</span><strong>R$ ${fmt(loan.amount)}</strong></div><div><span>Já recebido</span><strong>R$ ${fmt(paid)}</strong></div><div class="loan-balance"><span>Falta receber</span><strong>R$ ${fmt(balance)}</strong></div></div>
       <div class="loan-progress"><div style="width:${progress}%"></div></div>
       <div class="loan-meta"><span>📅 ${loan.dueDate ? `Vence em ${formatDateBR(loan.dueDate)}` : 'Sem vencimento'}</span>${loan.notes ? `<span>📝 ${escapeHTML(loan.notes)}</span>` : ''}</div>
       ${payments.length ? `<details class="loan-history"><summary>${payments.length} pagamento${payments.length > 1 ? 's' : ''} recebido${payments.length > 1 ? 's' : ''}</summary>${payments.map(payment => `<div><span>${formatDateBR(payment.date)}${payment.notes ? ` · ${escapeHTML(payment.notes)}` : ''}</span><strong>R$ ${fmt(payment.amount)}</strong><button onclick="deleteLoanPayment('${loan.id}','${payment.id}')" aria-label="Excluir pagamento">×</button></div>`).join('')}</details>` : ''}
-      <div class="loan-actions">${balance > 0 ? `<button class="btn btn-primary btn-sm" onclick="openLoanPaymentModal('${loan.id}')">Registrar pagamento</button>` : ''}<button class="btn btn-ghost btn-sm" onclick="editLoan('${loan.id}')">Editar</button><button class="icon-danger" onclick="deleteLoan('${loan.id}')" aria-label="Excluir empréstimo">×</button></div>
+      <div class="loan-actions">${balance > 0 ? `<button class="btn btn-primary btn-sm" onclick="openLoanPaymentModal('${loan.id}')">Registrar pagamento</button>` : ''}<button class="btn btn-ghost btn-sm" onclick="editLoan('${loan.id}')">Editar</button><button class="icon-danger" onclick="deleteLoan('${loan.id}')" aria-label="Excluir registro">×</button></div>
     </article>`;
   }).join('');
 }

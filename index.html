@@ -137,7 +137,7 @@
         <span class="nav-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         </span>
-        Emprestado
+        A receber
       </a>
       <a class="nav-item" data-section="budgets" href="#">
         <span class="nav-icon">
@@ -506,11 +506,11 @@
       <!-- ═══ LOANS ═══ -->
       <section id="sec-loans" class="section">
         <div class="section-header">
-          <div><span class="section-eyebrow">Valores a receber</span><h1 class="section-title">Emprestado</h1></div>
+          <div><span class="section-eyebrow">Valores a receber</span><h1 class="section-title">A receber</h1></div>
         </div>
 
         <div class="loan-summary-grid">
-          <div class="loan-summary-card"><span>Total emprestado</span><strong id="loanTotalLent">R$ 0,00</strong><small>valor original dos registros</small></div>
+          <div class="loan-summary-card"><span>Total a receber</span><strong id="loanTotalLent">R$ 0,00</strong><small>valor original dos registros</small></div>
           <div class="loan-summary-card received"><span>Já recebido</span><strong id="loanTotalReceived">R$ 0,00</strong><small>pagamentos registrados</small></div>
           <div class="loan-summary-card outstanding"><span>Falta receber</span><strong id="loanOutstanding">R$ 0,00</strong><small>saldo ainda em aberto</small></div>
           <div class="loan-summary-card people"><span>Pessoas devendo</span><strong id="loanPeopleOpen">0</strong><small>registros com saldo</small></div>
@@ -518,16 +518,16 @@
 
         <div class="feature-layout loan-layout">
           <div class="card feature-form-card">
-            <div class="card-header"><h3 id="loanFormTitle">Novo valor emprestado</h3></div>
+            <div class="card-header"><h3 id="loanFormTitle">Novo valor a receber</h3></div>
             <div class="feature-form">
               <label class="form-group full"><span class="form-label">Nome da pessoa</span><input id="loanPerson" class="form-input" placeholder="Ex: João Silva" autocomplete="off"></label>
               <div class="form-grid">
-                <label class="form-group"><span class="form-label">Valor emprestado</span><input id="loanAmount" class="form-input" inputmode="decimal" placeholder="0,00"></label>
-                <label class="form-group"><span class="form-label">Data do empréstimo</span><input id="loanDate" type="date" class="form-input"></label>
+                <label class="form-group"><span class="form-label">Valor a receber</span><input id="loanAmount" class="form-input" inputmode="decimal" placeholder="0,00"></label>
+                <label class="form-group"><span class="form-label">Data do registro</span><input id="loanDate" type="date" class="form-input"></label>
                 <label class="form-group full"><span class="form-label">Vencimento opcional</span><input id="loanDueDate" type="date" class="form-input"></label>
                 <label class="form-group full"><span class="form-label">Observações</span><textarea id="loanNotes" class="form-input" rows="3" placeholder="Motivo, forma combinada de pagamento..."></textarea></label>
               </div>
-              <div class="feature-form-actions"><button class="btn btn-ghost" id="cancelLoanEditBtn" hidden onclick="resetLoanForm()">Cancelar</button><button class="btn btn-primary" id="saveLoanBtn" onclick="saveLoan()">Adicionar pessoa</button></div>
+              <div class="feature-form-actions"><button class="btn btn-ghost" id="cancelLoanEditBtn" hidden onclick="resetLoanForm()">Cancelar</button><button class="btn btn-primary" id="saveLoanBtn" onclick="saveLoan()">Salvar valor a receber</button></div>
             </div>
           </div>
 
