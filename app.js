@@ -466,18 +466,24 @@ function normalizeMonth(value) {
 
 function isCreditTransaction(transaction) {
   if (transaction.type !== 'expense') return false;
+  if (transaction.cardKey) return true;
   const payment = String(transaction.payment || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
-  if (payment.includes('credito')) return true;
+  if (payment.includes('credito') || payment.includes('cartao') || payment.includes('card')) return true;
   if (transaction.installmentGroupId || Number(transaction.installments) > 1) return true;
-  return Boolean(transaction.cardKey && !payment);
+  return false;
 }
 
 function isTransactionForCard(transaction, cardId) {
   if (!isCreditTransaction(transaction)) return false;
-  if (transaction.cardKey) return transaction.cardKey === cardId;
+  if (transaction.cardKey) {
+    if (transaction.cardKey === cardId) return true;
+    const isKnown = customCards.some(c => c.id === transaction.cardKey);
+    if (!isKnown && cardId === 'outro') return true;
+    return false;
+  }
   return cardId === 'outro';
 }
 
@@ -487,9 +493,28 @@ function getTransactionInvoiceMonth(t) {
 }
 
 function getCardTransactionsTotal(cardId, month) {
+  const norm = normalizeMonth(month);
   return transactions
-    .filter(t => isTransactionForCard(t, cardId) && getTransactionInvoiceMonth(t) === normalizeMonth(month))
+    .filter(t => isTransactionForCard(t, cardId) && getTransactionInvoiceMonth(t) === norm)
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+}
+
+function getActiveCardsList() {
+  const list = [...customCards];
+  const knownIds = new Set(customCards.map(c => c.id));
+  const hasOutro = transactions.some(t => isCreditTransaction(t) && t.cardKey && !knownIds.has(t.cardKey));
+  if (hasOutro) {
+    list.push({
+      id: 'outro',
+      name: 'Outro Cartão',
+      initials: 'OC',
+      color: 'linear-gradient(135deg,#64748b,#475569)',
+      limit: 0,
+      closingDay: null,
+      dueDay: null
+    });
+  }
+  return list;
 }
 
 function getCardManualTotal(cardId, month) {
@@ -1320,6 +1345,8 @@ function openModal(id = null) {
     document.getElementById('fNotes').value  = '';
     document.getElementById('fRecurring').checked = false;
     setDefaultDate();
+    const payEl = document.getElementById('fPayment');
+    if (payEl) payEl.value = 'credito';
     if (typeof selectCard === 'function') selectCard(defaultCard);
     if (typeof onPaymentChange === 'function') onPaymentChange();
     const installEl = document.getElementById('fInstallments');
@@ -1362,16 +1389,9 @@ function saveTransaction() {
   const firstAmount = n > 1 ? +(totalAmt - savedAmount * (n - 1)).toFixed(2) : totalAmt;
 
   const [yy, mm, dd] = date.split('-').map(Number);
-  let monthOffset = 0;
-  if (payment === 'credito' && cardObj && cardObj.closingDay) {
-    if (dd > parseInt(cardObj.closingDay)) {
-      monthOffset = 1;
-    }
-  }
-
-  const baseInvoiceMonth = payment === 'credito'
-    ? getSafeMonthDate(yy, (mm - 1) + monthOffset, 1).slice(0, 7)
-    : null;
+  const txMonth = `${yy}-${String(mm).padStart(2, '0')}`;
+  const isCard = (payment === 'credito' || payment === 'debito' || Boolean(cardKey));
+  const baseInvoiceMonth = isCard ? txMonth : null;
 
   if (editingId) {
     const idx = transactions.findIndex(t => t.id === editingId);
@@ -1390,7 +1410,7 @@ function saveTransaction() {
         for (let i = 1; i <= n; i++) {
           const loopDateStr = getSafeMonthDate(sy, (sm - 1) + (i - 1), sd);
           const instAmount = i === 1 ? firstAmount : savedAmount;
-          const instInvoiceMonth = payment === 'credito' ? getSafeMonthDate(sy, (sm - 1) + monthOffset + (i - 1), 1).slice(0, 7) : null;
+          const instInvoiceMonth = isCard ? getSafeMonthDate(sy, (sm - 1) + (i - 1), 1).slice(0, 7) : null;
           transactions.push({
             id:uid(), type:currentType, desc, amount:instAmount, date:loopDateStr, cat, payment, notes, recurring,
             cardKey, cardLabel, invoiceMonth: instInvoiceMonth,
@@ -1437,7 +1457,7 @@ function saveTransaction() {
       for (let i = 1; i <= n; i++) {
         const loopDateStr = getSafeMonthDate(yy, (mm - 1) + (i - 1), dd);
         const instAmount = i === 1 ? firstAmount : savedAmount;
-        const instInvoiceMonth = payment === 'credito' ? getSafeMonthDate(yy, (mm - 1) + monthOffset + (i - 1), 1).slice(0, 7) : null;
+        const instInvoiceMonth = isCard ? getSafeMonthDate(yy, (mm - 1) + (i - 1), 1).slice(0, 7) : null;
 
         transactions.push({
           id:uid(), type:currentType, desc, amount:instAmount, date:loopDateStr, cat, payment, notes, recurring,
@@ -1450,7 +1470,7 @@ function saveTransaction() {
           createdAt:new Date().toISOString()
         });
       }
-      showToast(`Compra parcelada: ${n}x de R$ ${(savedAmount).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} ${monthOffset === 1 ? '(fatura mês seguinte)' : ''} ✓`, 'success');
+      showToast(`Compra parcelada adicionada às faturas: ${n}x de R$ ${(savedAmount).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} 💳 ✓`, 'success');
     } else {
       transactions.push({
         id:uid(), type:currentType, desc, amount:totalAmt, date, cat, payment, notes, recurring,
@@ -1458,7 +1478,7 @@ function saveTransaction() {
         installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null,
         createdAt:new Date().toISOString()
       });
-      showToast(monthOffset === 1 ? 'Lançado na data real (fatura do mês seguinte) 💳' : 'Transação adicionada ✓', 'success');
+      showToast(isCard ? 'Transação adicionada à fatura do cartão 💳 ✓' : 'Transação adicionada ✓', 'success');
     }
   }
 
@@ -3173,18 +3193,33 @@ function renderInvoices() {
   const months = getInvoiceMonthsForPeriod('invoices');
   const total = getAllCardsInvoiceTotal('invoices');
   if (totalEl) totalEl.textContent = `R$ ${fmt(total)}`;
-  if (!customCards.length) {
+  const cardsToDisplay = getActiveCardsList();
+  if (!cardsToDisplay.length) {
     grid.innerHTML = '<div class="empty-state"><div class="empty-icon">💳</div><p>Cadastre um cartão em Preferências para começar.</p></div>';
     return;
   }
-  grid.innerHTML = customCards.map(card => {
-    const transactionsTotal = months.reduce((sum, month) => sum + getCardTransactionsTotal(card.id, month), 0);
+  grid.innerHTML = cardsToDisplay.map(card => {
+    const cardTxs = transactions.filter(t => isTransactionForCard(t, card.id) && months.includes(getTransactionInvoiceMonth(t)));
+    const transactionsTotal = cardTxs.reduce((sum, t) => sum + Number(t.amount || 0), 0);
     const manualTotal = months.reduce((sum, month) => sum + getCardManualTotal(card.id, month), 0);
     const adjustments = cardInvoiceAdjustments.filter(item => item.cardId === card.id && months.includes(normalizeMonth(item.month)));
+    const txsListHtml = cardTxs.length ? `
+      <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border); font-size:12px;">
+        <div style="font-weight:600; margin-bottom:6px; color:var(--text2);">Compras nesta fatura (${cardTxs.length}):</div>
+        ${cardTxs.slice(0, 6).map(t => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:3px 0; color:var(--text);">
+            <span>${escapeHTML(t.desc)}${t.installments > 1 ? ` <small style="color:var(--text2)">(${t.installmentPaid}/${t.installments})</small>` : ''}</span>
+            <strong>R$ ${fmt(t.amount)}</strong>
+          </div>
+        `).join('')}
+        ${cardTxs.length > 6 ? `<div style="font-size:11px; color:var(--text2); margin-top:4px;">+ ${cardTxs.length - 6} outras compras nesta fatura</div>` : ''}
+      </div>` : '';
+
     return `<article class="invoice-card">
       <div class="invoice-card-head"><div class="cc-brand-icon" style="background:${card.color}">${escapeHTML(card.initials || card.name.slice(0,2))}</div><div><strong>${escapeHTML(card.name)}</strong><span>Fatura calculada</span></div><b>R$ ${fmt(transactionsTotal + manualTotal)}</b></div>
       <div class="invoice-breakdown"><span>Transações <strong>R$ ${fmt(transactionsTotal)}</strong></span><span>Ajuste manual <strong>R$ ${fmt(manualTotal)}</strong></span></div>
-      ${adjustments.length ? `<div class="invoice-adjustments">${adjustments.map(item => `<span>${item.month}: R$ ${fmt(item.amount)} <button onclick="deleteInvoiceAdjustment('${item.id}')" aria-label="Remover ajuste">×</button></span>`).join('')}</div>` : ''}
+      ${txsListHtml}
+      ${adjustments.length ? `<div class="invoice-adjustments" style="margin-top:10px;">${adjustments.map(item => `<span>${item.month}: R$ ${fmt(item.amount)} <button onclick="deleteInvoiceAdjustment('${item.id}')" aria-label="Remover ajuste">×</button></span>`).join('')}</div>` : ''}
     </article>`;
   }).join('');
 }
@@ -3383,12 +3418,13 @@ function renderCards() {
   const el = document.getElementById('cardsGrid');
   if (!el) return;
 
-  if (customCards.length === 0) {
+  const cardsToDisplay = getActiveCardsList();
+  if (cardsToDisplay.length === 0) {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">💳</div><p>Nenhum cartão cadastrado. Vá em Preferências para adicionar.</p></div>';
     return;
   }
 
-  const html = customCards.map(c => {
+  const html = cardsToDisplay.map(c => {
     const isThisCard = (t) => {
       if (t.type !== 'expense') return false;
       if (t.cardKey) return t.cardKey === c.id;
