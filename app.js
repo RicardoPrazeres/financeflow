@@ -49,14 +49,14 @@ function getSupabaseConfig() {
   return { url, key, isConfigured };
 }
 
-let supabase = null;
+let sbClient = null;
 let currentUser = null;
 
 function initSupabase() {
   const { url, key, isConfigured } = getSupabaseConfig();
-  if (isConfigured && typeof window.supabase !== 'undefined') {
+  if (isConfigured && typeof window.supabase !== 'undefined' && typeof window.supabase.createClient === 'function') {
     try {
-      supabase = window.supabase.createClient(url, key, {
+      sbClient = window.supabase.createClient(url, key, {
         auth: {
           persistSession: true,
           autoRefreshToken: true,
@@ -65,10 +65,10 @@ function initSupabase() {
       });
     } catch (e) {
       console.warn('Erro ao inicializar cliente Supabase:', e);
-      supabase = null;
+      sbClient = null;
     }
   } else {
-    supabase = null;
+    sbClient = null;
   }
 }
 
@@ -290,9 +290,9 @@ async function init() {
   initTheme();
   initSupabase();
 
-  if (supabase) {
+  if (sbClient) {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await sbClient.auth.getSession();
       if (session?.user) {
         currentUser = session.user;
         localStorage.removeItem('ff_guest_mode');
@@ -307,7 +307,7 @@ async function init() {
       checkGuestOrShowLogin();
     }
 
-    supabase.auth.onAuthStateChange(async (event, session) => {
+    sbClient.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         currentUser = session.user;
         localStorage.removeItem('ff_guest_mode');
@@ -543,11 +543,81 @@ function setLoginState(message = '', type = 'info', busy = false) {
   }
 }
 
+function handleEmailLogin() {
+  const email = document.getElementById('loginEmailInput')?.value.trim();
+  const pass = document.getElementById('loginPasswordInput')?.value;
+  if (!email || !pass) {
+    showToast('Informe seu e-mail e senha', 'warning');
+    return;
+  }
+  loginWithEmail(email, pass);
+}
+
+function handleEmailRegister() {
+  const email = document.getElementById('loginEmailInput')?.value.trim();
+  const pass = document.getElementById('loginPasswordInput')?.value;
+  if (!email || !pass) {
+    showToast('Informe seu e-mail e senha', 'warning');
+    return;
+  }
+  if (pass.length < 6) {
+    showToast('A senha precisa ter no mínimo 6 caracteres', 'warning');
+    return;
+  }
+  registerWithEmail(email, pass, email.split('@')[0]);
+}
+
+async function loginWithEmail(email, password) {
+  if (loginInProgress) return;
+  if (!sbClient) {
+    showToast('Supabase não conectado', 'warning');
+    return;
+  }
+  loginInProgress = true;
+  setLoginState('Verificando credenciais...', 'info', true);
+  try {
+    const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    loginInProgress = false;
+    setLoginState('', 'success', false);
+    showToast('Login realizado com sucesso! 👋', 'success');
+  } catch (err) {
+    loginInProgress = false;
+    setLoginState(err.message || 'Falha ao entrar com email.', 'error', false);
+    showToast(err.message || 'Email ou senha inválidos', 'error');
+  }
+}
+
+async function registerWithEmail(email, password, name) {
+  if (loginInProgress) return;
+  if (!sbClient) {
+    showToast('Supabase não conectado', 'warning');
+    return;
+  }
+  loginInProgress = true;
+  setLoginState('Criando sua conta...', 'info', true);
+  try {
+    const { data, error } = await sbClient.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: name } }
+    });
+    if (error) throw error;
+    loginInProgress = false;
+    setLoginState('Conta criada com sucesso!', 'success', false);
+    showToast('Conta criada com sucesso! 🚀', 'success');
+  } catch (err) {
+    loginInProgress = false;
+    setLoginState(err.message || 'Falha ao criar conta.', 'error', false);
+    showToast(err.message || 'Erro ao criar conta', 'error');
+  }
+}
+
 async function loginWithGoogle() {
   if (loginInProgress) return;
   localStorage.removeItem('ff_guest_mode');
 
-  if (!supabase) {
+  if (!sbClient) {
     setLoginState('Supabase não conectado. Use o Modo Local abaixo ou insira suas credenciais em Preferências.', 'info', false);
     showToast('Configure a URL e Chave do Supabase em Preferências ou use o Modo Local ⚡', 'info');
     return;
@@ -558,7 +628,7 @@ async function loginWithGoogle() {
 
   try {
     const redirectUrl = window.location.origin + window.location.pathname;
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { data, error } = await sbClient.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: redirectUrl
@@ -598,9 +668,9 @@ async function logout() {
   localStorage.removeItem('ff_card_invoice_adjustments');
   localStorage.removeItem('ff_loans');
 
-  if (supabase) {
+  if (sbClient) {
     try {
-      await supabase.auth.signOut();
+      await sbClient.auth.signOut();
     } catch (e) {
       console.warn('Erro ao sair do Supabase:', e);
     }
@@ -622,7 +692,7 @@ function loadData() {
 }
 
 async function loadDataFromSupabase() {
-  if (!supabase || !currentUser || currentUser.id === 'guest_user') {
+  if (!sbClient || !currentUser || currentUser.id === 'guest_user') {
     loadData();
     return;
   }
@@ -640,14 +710,14 @@ async function loadDataFromSupabase() {
       { data: goalsData },
       { data: adjData }
     ] = await Promise.all([
-      supabase.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
-      supabase.from('custom_categories').select('*').eq('user_id', userId),
-      supabase.from('custom_cards').select('*').eq('user_id', userId),
-      supabase.from('fixed_expenses').select('*').eq('user_id', userId),
-      supabase.from('loans').select('*, loan_payments(*)').eq('user_id', userId),
-      supabase.from('budgets').select('*').eq('user_id', userId),
-      supabase.from('goals').select('*').eq('user_id', userId),
-      supabase.from('card_invoice_adjustments').select('*').eq('user_id', userId)
+      sbClient.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
+      sbClient.from('custom_categories').select('*').eq('user_id', userId),
+      sbClient.from('custom_cards').select('*').eq('user_id', userId),
+      sbClient.from('fixed_expenses').select('*').eq('user_id', userId),
+      sbClient.from('loans').select('*, loan_payments(*)').eq('user_id', userId),
+      sbClient.from('budgets').select('*').eq('user_id', userId),
+      sbClient.from('goals').select('*').eq('user_id', userId),
+      sbClient.from('card_invoice_adjustments').select('*').eq('user_id', userId)
     ]);
 
     if (txsErr) throw txsErr;
@@ -789,7 +859,7 @@ function saveData() {
   localStorage.setItem('ff_card_invoice_adjustments', JSON.stringify(cardInvoiceAdjustments));
   localStorage.setItem('ff_loans', JSON.stringify(loans));
   
-  if (supabase && currentUser && currentUser.id !== 'guest_user') {
+  if (sbClient && currentUser && currentUser.id !== 'guest_user') {
     if (syncTimeout) clearTimeout(syncTimeout);
     syncTimeout = setTimeout(() => {
       syncAllToSupabase().catch(err => console.error('Erro ao sincronizar com Supabase:', err));
@@ -798,7 +868,7 @@ function saveData() {
 }
 
 async function syncAllToSupabase() {
-  if (!supabase || !currentUser || currentUser.id === 'guest_user') return;
+  if (!sbClient || !currentUser || currentUser.id === 'guest_user') return;
   const userId = currentUser.id;
 
   try {
@@ -825,7 +895,7 @@ async function syncAllToSupabase() {
         fixed_expense_id: t.fixedExpenseId || null,
         fixed_expense_month: t.fixedExpenseMonth || null
       }));
-      await supabase.from('transactions').upsert(txRows, { onConflict: 'id,user_id' });
+      await sbClient.from('transactions').upsert(txRows, { onConflict: 'id,user_id' });
     }
 
     if (fixedExpenses.length > 0) {
@@ -842,7 +912,7 @@ async function syncAllToSupabase() {
         active: f.active !== false,
         generated_months: f.generatedMonths || []
       }));
-      await supabase.from('fixed_expenses').upsert(feRows, { onConflict: 'id,user_id' });
+      await sbClient.from('fixed_expenses').upsert(feRows, { onConflict: 'id,user_id' });
     }
 
     if (loans.length > 0) {
@@ -855,7 +925,7 @@ async function syncAllToSupabase() {
         due_date: l.dueDate || null,
         notes: l.notes || null
       }));
-      await supabase.from('loans').upsert(loanRows, { onConflict: 'id,user_id' });
+      await sbClient.from('loans').upsert(loanRows, { onConflict: 'id,user_id' });
 
       const paymentRows = [];
       loans.forEach(l => {
@@ -871,7 +941,7 @@ async function syncAllToSupabase() {
         });
       });
       if (paymentRows.length > 0) {
-        await supabase.from('loan_payments').upsert(paymentRows, { onConflict: 'id,user_id' });
+        await sbClient.from('loan_payments').upsert(paymentRows, { onConflict: 'id,user_id' });
       }
     }
 
@@ -883,7 +953,7 @@ async function syncAllToSupabase() {
         amount_limit: Number(b.limit || 0),
         month: b.month || null
       }));
-      await supabase.from('budgets').upsert(bRows, { onConflict: 'id,user_id' });
+      await sbClient.from('budgets').upsert(bRows, { onConflict: 'id,user_id' });
     }
 
     if (goals.length > 0) {
@@ -896,7 +966,7 @@ async function syncAllToSupabase() {
         target_value: Number(g.targetValue || 0),
         current_value: Number(g.currentValue || 0)
       }));
-      await supabase.from('goals').upsert(gRows, { onConflict: 'id,user_id' });
+      await sbClient.from('goals').upsert(gRows, { onConflict: 'id,user_id' });
     }
 
     if (customCards.length > 0) {
@@ -910,7 +980,7 @@ async function syncAllToSupabase() {
         closing_day: c.closingDay || null,
         due_day: c.dueDay || null
       }));
-      await supabase.from('custom_cards').upsert(cardRows, { onConflict: 'id,user_id' });
+      await sbClient.from('custom_cards').upsert(cardRows, { onConflict: 'id,user_id' });
     }
 
     const defaultIds = new Set(DEFAULT_CATEGORIES.map(c => c.id));
@@ -923,7 +993,7 @@ async function syncAllToSupabase() {
         emoji: c.emoji || '📦',
         color: c.color || '#6b7280'
       }));
-      await supabase.from('custom_categories').upsert(catRows, { onConflict: 'id,user_id' });
+      await sbClient.from('custom_categories').upsert(catRows, { onConflict: 'id,user_id' });
     }
   } catch (err) {
     console.error('Erro na sincronização com Supabase:', err);
@@ -1410,14 +1480,14 @@ function deleteTransaction(id) {
 
   if (gid) {
     transactions = transactions.filter(t => t.installmentGroupId !== gid);
-    if (supabase && currentUser && currentUser.id !== 'guest_user') {
-      supabase.from('transactions').delete().eq('installment_group_id', gid).eq('user_id', currentUser.id).then();
+    if (sbClient && currentUser && currentUser.id !== 'guest_user') {
+      sbClient.from('transactions').delete().eq('installment_group_id', gid).eq('user_id', currentUser.id).then();
     }
     showToast('Todas as parcelas foram excluídas ✓', 'warning');
   } else {
     transactions = transactions.filter(t => t.id !== id);
-    if (supabase && currentUser && currentUser.id !== 'guest_user') {
-      supabase.from('transactions').delete().eq('id', id).eq('user_id', currentUser.id).then();
+    if (sbClient && currentUser && currentUser.id !== 'guest_user') {
+      sbClient.from('transactions').delete().eq('id', id).eq('user_id', currentUser.id).then();
     }
     showToast('Transação excluída', 'warning');
   }
@@ -2216,7 +2286,7 @@ function renderSettings() {
   if (urlInput) urlInput.value = localStorage.getItem('ff_supabase_url') || (isConfigured ? url : '');
   if (keyInput) keyInput.value = localStorage.getItem('ff_supabase_anon_key') || (isConfigured ? key : '');
   if (badge) {
-    if (isConfigured && supabase) {
+    if (isConfigured && sbClient) {
       badge.textContent = '● Conectado (Nuvem)';
       badge.style.background = 'rgba(34,197,94,0.15)';
       badge.style.color = 'var(--green)';
@@ -2403,18 +2473,18 @@ function saveSupabaseConfig() {
   initSupabase();
   renderSettings();
   showToast('Configurações do Supabase salvas ✓', 'success');
-  if (supabase) {
+  if (sbClient) {
     testSupabaseConnection();
   }
 }
 
 async function testSupabaseConnection() {
-  if (!supabase) {
+  if (!sbClient) {
     return showToast('Informe a URL e Chave do Supabase primeiro', 'warning');
   }
   showToast('Testando conexão com o Supabase...', 'info');
   try {
-    const { error } = await supabase.from('profiles').select('count', { count: 'exact', head: true });
+    const { error } = await sbClient.from('profiles').select('count', { count: 'exact', head: true });
     showToast('Conexão com Supabase bem-sucedida! 🚀', 'success');
     renderSettings();
   } catch (err) {
@@ -2426,16 +2496,16 @@ function clearAllData() {
   if (!confirm('⚠️ Isso irá apagar TODOS os dados locais e na nuvem. Continuar?')) return;
   if (!confirm('Tem certeza absoluta? Esta ação não pode ser desfeita.')) return;
   localStorage.clear();
-  if (supabase && currentUser && currentUser.id !== 'guest_user') {
+  if (sbClient && currentUser && currentUser.id !== 'guest_user') {
     const uid = currentUser.id;
     Promise.all([
-      supabase.from('transactions').delete().eq('user_id', uid),
-      supabase.from('fixed_expenses').delete().eq('user_id', uid),
-      supabase.from('loans').delete().eq('user_id', uid),
-      supabase.from('budgets').delete().eq('user_id', uid),
-      supabase.from('goals').delete().eq('user_id', uid),
-      supabase.from('custom_cards').delete().eq('user_id', uid),
-      supabase.from('custom_categories').delete().eq('user_id', uid)
+      sbClient.from('transactions').delete().eq('user_id', uid),
+      sbClient.from('fixed_expenses').delete().eq('user_id', uid),
+      sbClient.from('loans').delete().eq('user_id', uid),
+      sbClient.from('budgets').delete().eq('user_id', uid),
+      sbClient.from('goals').delete().eq('user_id', uid),
+      sbClient.from('custom_cards').delete().eq('user_id', uid),
+      sbClient.from('custom_categories').delete().eq('user_id', uid)
     ]).then(() => location.reload()).catch(() => location.reload());
   } else {
     location.reload();
@@ -3024,9 +3094,9 @@ function deleteFixedExpense(id) {
   if (!item || !confirm(`Excluir a despesa fixa “${item.desc}”? Deseja remover também os lançamentos automáticos correspondentes nas transações?`)) return;
   fixedExpenses = fixedExpenses.filter(expense => expense.id !== id);
   transactions = transactions.filter(t => t.fixedExpenseId !== id);
-  if (supabase && currentUser && currentUser.id !== 'guest_user') {
-    supabase.from('fixed_expenses').delete().eq('id', id).eq('user_id', currentUser.id).then();
-    supabase.from('transactions').delete().eq('fixed_expense_id', id).eq('user_id', currentUser.id).then();
+  if (sbClient && currentUser && currentUser.id !== 'guest_user') {
+    sbClient.from('fixed_expenses').delete().eq('id', id).eq('user_id', currentUser.id).then();
+    sbClient.from('transactions').delete().eq('fixed_expense_id', id).eq('user_id', currentUser.id).then();
   }
   if (editingFixedExpenseId === id) resetFixedExpenseForm();
   saveData();
@@ -3201,8 +3271,8 @@ function deleteLoan(id) {
   const loan = loans.find(item => item.id === id);
   if (!loan || !confirm(`Excluir o registro de ${loan.person} e todo o histórico de pagamentos?`)) return;
   loans = loans.filter(item => item.id !== id);
-  if (supabase && currentUser && currentUser.id !== 'guest_user') {
-    supabase.from('loans').delete().eq('id', id).eq('user_id', currentUser.id).then();
+  if (sbClient && currentUser && currentUser.id !== 'guest_user') {
+    sbClient.from('loans').delete().eq('id', id).eq('user_id', currentUser.id).then();
   }
   if (editingLoanId === id) resetLoanForm();
   saveData();
