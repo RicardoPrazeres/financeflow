@@ -371,24 +371,28 @@ function processRecurringTransactions() {
   }
 }
 
-function processFixedExpenses() {
+function processFixedExpenses(targetEndMonth = null) {
   if (!fixedExpenses.length) return;
   const currentMonth = getCurrentMonthStr();
+  let maxMonth = currentMonth;
+  if (targetEndMonth && targetEndMonth > maxMonth) {
+    maxMonth = targetEndMonth;
+  }
   let createdCount = 0;
 
   fixedExpenses.filter(item => item.active !== false).forEach(item => {
     const startMonth = item.startMonth || currentMonth;
-    if (startMonth > currentMonth) return;
     const [startYear, startMonthNumber] = startMonth.split('-').map(Number);
-    const [currentYear, currentMonthNumber] = currentMonth.split('-').map(Number);
+    const endMonthToUse = maxMonth < startMonth ? startMonth : maxMonth;
+    const [endYear, endMonthNumber] = endMonthToUse.split('-').map(Number);
     const generatedMonths = new Set(item.generatedMonths || []);
 
     for (let cursor = new Date(startYear, startMonthNumber - 1, 1);
-      cursor <= new Date(currentYear, currentMonthNumber - 1, 1);
+      cursor <= new Date(endYear, endMonthNumber - 1, 1);
       cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)) {
       const month = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
-      const alreadyExists = generatedMonths.has(month) || transactions.some(t =>
-        t.fixedExpenseId === item.id && t.fixedExpenseMonth === month
+      const alreadyExists = transactions.some(t =>
+        t.fixedExpenseId === item.id && (t.fixedExpenseMonth === month || t.date?.startsWith(month))
       );
       if (alreadyExists) {
         generatedMonths.add(month);
@@ -404,7 +408,7 @@ function processFixedExpenses() {
         date: getSafeMonthDate(cursor.getFullYear(), cursor.getMonth(), Number(item.chargeDay) || 1),
         cat: item.cat || 'other',
         payment: item.payment || 'outro',
-        notes: 'Gerada automaticamente em Despesas Fixas',
+        notes: 'Despesa fixa automática',
         recurring: false,
         fixedExpenseId: item.id,
         fixedExpenseMonth: month,
@@ -420,7 +424,6 @@ function processFixedExpenses() {
 
   if (createdCount > 0) {
     saveData();
-    showToast(`${createdCount} cobrança(s) fixa(s) adicionada(s) ✓`, 'success');
   }
 }
 
@@ -1501,8 +1504,25 @@ function closeAlerts() {
   document.getElementById('alertsPanel').style.display = 'none';
 }
 
+// ── LOAN PERIOD HELPERS ──────────────────────────
+function getLoanDate(l) {
+  return l.loanDate || (l.createdAt ? l.createdAt.slice(0, 10) : getTodayStr());
+}
+
+function getPeriodLoansTotal(prefix = 'dash') {
+  return loans
+    .filter(l => matchesPeriod(getLoanDate(l), prefix))
+    .reduce((sum, l) => sum + Number(l.amount || 0), 0);
+}
+
 // ── DASHBOARD ────────────────────────────────────
 function renderDashboard() {
+  const sel = getPeriodSelection('dash');
+  let targetMonth = null;
+  if (sel.mode === 'year') targetMonth = `${sel.value}-12`;
+  else if (sel.mode === 'month') targetMonth = sel.value;
+  else if (sel.mode === 'day') targetMonth = sel.value.slice(0, 7);
+  processFixedExpenses(targetMonth);
   renderDashboardKPIs();
   renderMonthlyChart();
   renderCategoryChart();
@@ -1519,7 +1539,12 @@ function renderDashboardKPIs() {
   const income  = txs.filter(t => t.type === 'income').reduce((s,t) => s+t.amount, 0);
   const transactionExpense = txs.filter(t => t.type === 'expense').reduce((s,t) => s+t.amount, 0);
   const manualInvoiceExpense = getManualInvoiceTotal('dash');
-  const expense = transactionExpense + manualInvoiceExpense;
+  const rawExpense = transactionExpense + manualInvoiceExpense;
+
+  // Desconto dos valores Emprestado na dashboard em saídas
+  const loanDiscount = getPeriodLoansTotal('dash');
+  const expense = Math.max(0, rawExpense - loanDiscount);
+
   const balance = income - expense;
   const savings = income > 0 ? ((income - expense) / income * 100) : 0;
   const invoiceTotal = getAllCardsInvoiceTotal('dash');
@@ -1533,10 +1558,21 @@ function renderDashboardKPIs() {
   document.getElementById('kpiInvoicesLabel').textContent = invoiceMode === 'year' ? 'Faturas no ano' : 'Faturas no mês';
   document.getElementById('kpiInvoicesSub').textContent = 'transações + ajustes manuais';
   document.getElementById('kpiIncomeSub').textContent  = `${txs.filter(t=>t.type==='income').length} transações`;
+
   const expenseCount = txs.filter(t=>t.type==='expense').length;
-  document.getElementById('kpiExpenseSub').textContent = manualInvoiceExpense > 0
-    ? `${expenseCount} transações + faturas manuais`
-    : `${expenseCount} transações`;
+  const fixedTotal = txs.filter(t=>t.type==='expense' && t.fixedExpenseId).reduce((s,t) => s+t.amount, 0);
+
+  const subParts = [];
+  if (fixedTotal > 0) subParts.push(`inclui R$ ${fmt(fixedTotal)} fixas`);
+  if (manualInvoiceExpense > 0) subParts.push(`+ faturas`);
+  if (loanDiscount > 0) subParts.push(`− R$ ${fmt(loanDiscount)} emprestado`);
+
+  if (subParts.length > 0) {
+    document.getElementById('kpiExpenseSub').textContent = `${expenseCount} txs (${subParts.join(', ')})`;
+  } else {
+    document.getElementById('kpiExpenseSub').textContent = `${expenseCount} transações`;
+  }
+
   document.getElementById('kpiBalance').style.color  = balance >= 0 ? 'var(--green)' : 'var(--red)';
 
   const sideBalance = document.getElementById('sidebarBalance');
@@ -1563,7 +1599,10 @@ function renderMonthlyChart() {
     const mTxs = transactions.filter(t => t.date?.startsWith(m));
     incomes.push(mTxs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0));
     const transactionExpense = mTxs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
-    expenses.push(transactionExpense + getManualInvoiceTotalForMonths([m]));
+    const mManualInvoices = getManualInvoiceTotalForMonths([m]);
+    const mLoans = loans.filter(l => getLoanDate(l).startsWith(m)).reduce((s,l) => s + Number(l.amount || 0), 0);
+    const mNetExpense = Math.max(0, transactionExpense + mManualInvoices - mLoans);
+    expenses.push(mNetExpense);
   }
 
   const ctx = document.getElementById('chartMonthly').getContext('2d');
@@ -1660,6 +1699,13 @@ function renderRecentTransactions() {
 
 // ── TRANSACTIONS ─────────────────────────────────
 function renderTransactions() {
+  const sel = getPeriodSelection('transactions');
+  let targetMonth = null;
+  if (sel.mode === 'year') targetMonth = `${sel.value}-12`;
+  else if (sel.mode === 'month') targetMonth = sel.value;
+  else if (sel.mode === 'day') targetMonth = sel.value.slice(0, 7);
+  processFixedExpenses(targetMonth);
+
   const type   = document.getElementById('filterType').value;
   const cat    = document.getElementById('filterCategory').value;
   const search = document.getElementById('filterSearch').value.toLowerCase();
@@ -1743,18 +1789,23 @@ function txItemHTML(t, showActions=false) {
   // Card badge
   const cardBadge = t.cardLabel ? `<span class="tx-card-badge tx-card-${t.cardKey || 'outro'}">${t.cardLabel}</span>` : '';
 
+  // Fixed expense badge
+  const fixedBadge = t.fixedExpenseId
+    ? `<span class="tx-installment-badge tx-fixed-badge" style="background:rgba(99,102,241,0.15);color:var(--accent-bright);" title="Despesa Fixa">📌 Fixa</span>`
+    : '';
+
   return `<div class="tx-item ${showActions ? 'tx-item-wide' : ''} ${selectedIds.has(t.id) ? 'tx-selected' : ''}" data-id="${t.id}" ${rowClick}>
     ${checkbox}
     <div class="tx-icon" style="background:${cat.color}22">${cat.emoji}</div>
     <div class="tx-info mobile-col">
-      <div class="tx-desc">${esc(t.desc)}${t.recurring?' 🔄':''}</div>
-      <div class="tx-meta">${cat.name} · ${dateStr} · ${t.payment}${cardBadge}${installBadge}</div>
+      <div class="tx-desc">${esc(t.desc)}${t.recurring?' 🔄':''}${t.fixedExpenseId?' 📌':''}</div>
+      <div class="tx-meta">${cat.name} · ${dateStr} · ${t.payment}${cardBadge}${installBadge}${fixedBadge}</div>
       ${installDetail}
     </div>
-    <div class="desktop-col tc-desc" title="${esc(t.desc)}">${esc(t.desc)}${t.recurring?' 🔄':''}</div>
+    <div class="desktop-col tc-desc" title="${esc(t.desc)}">${esc(t.desc)}${t.recurring?' 🔄':''}${t.fixedExpenseId?' 📌':''}</div>
     <div class="desktop-col tc-cat">${cat.emoji ? cat.emoji + ' ' : ''}${cat.name}</div>
     <div class="desktop-col tc-date">${dateStr}</div>
-    <div class="desktop-col tc-pay">${t.payment}${cardBadge}${installBadge} ${installDetail}</div>
+    <div class="desktop-col tc-pay">${t.payment}${cardBadge}${installBadge}${fixedBadge} ${installDetail}</div>
     <div class="desktop-col tc-notes" title="${esc(t.notes || '')}">${esc(t.notes || '-')}</div>
     <div class="tx-amount tc-amt ${t.type}">${t.type==='income'?'+':'-'}R$ ${fmt(t.installmentValue || t.amount)}</div>
     <div class="${showActions ? 'tc-acts' : ''}">${actions}</div>
@@ -1811,7 +1862,9 @@ function renderAnnualChart() {
     months.push(d.toLocaleString('pt-BR',{month:'short'}));
     const mT = transactions.filter(t=>t.date?.startsWith(m));
     incomes.push(mT.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0));
-    expenses.push(mT.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0));
+    const txExp = mT.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+    const mLoans = loans.filter(l => getLoanDate(l).startsWith(m)).reduce((s,l) => s + Number(l.amount || 0), 0);
+    expenses.push(Math.max(0, txExp + getManualInvoiceTotalForMonths([m]) - mLoans));
   }
   const ctx = document.getElementById('chartAnnual').getContext('2d');
   if (chartAnnual) chartAnnual.destroy();
@@ -1853,7 +1906,9 @@ function renderTrendChart() {
     const m = d.toISOString().slice(0,7);
     const mT = transactions.filter(t=>t.date?.startsWith(m));
     const inc = mT.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-    const exp = mT.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+    const txExp = mT.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+    const mLoans = loans.filter(l => getLoanDate(l).startsWith(m)).reduce((s,l) => s + Number(l.amount || 0), 0);
+    const exp = Math.max(0, txExp + getManualInvoiceTotalForMonths([m]) - mLoans);
     running += inc-exp;
     labels.push(d.toLocaleString('pt-BR',{month:'short'}));
     saldos.push(running);
@@ -2578,8 +2633,8 @@ function saveFixedExpense() {
     const index = fixedExpenses.findIndex(item => item.id === editingFixedExpenseId);
     if (index === -1) return;
     fixedExpenses[index] = { ...fixedExpenses[index], ...data, updatedAt: new Date().toISOString() };
-    transactions.filter(t => t.fixedExpenseId === editingFixedExpenseId && t.fixedExpenseMonth >= getCurrentMonthStr()).forEach(t => {
-      const [year, month] = t.fixedExpenseMonth.split('-').map(Number);
+    transactions.filter(t => t.fixedExpenseId === editingFixedExpenseId).forEach(t => {
+      const [year, month] = (t.fixedExpenseMonth || t.date.slice(0, 7)).split('-').map(Number);
       const card = customCards.find(c => c.id === cardKey);
       Object.assign(t, { desc, amount, cat, payment, cardKey: payment === 'credito' ? cardKey : null, cardLabel: payment === 'credito' ? (card?.name || null) : null, date: getSafeMonthDate(year, month - 1, chargeDay) });
     });
@@ -2591,7 +2646,9 @@ function saveFixedExpense() {
   resetFixedExpenseForm();
   renderFixedExpenses();
   renderDashboardKPIs();
-  showToast(wasEditing ? 'Despesa fixa atualizada ✓' : 'Despesa fixa adicionada ✓', 'success');
+  if (currentSection() === 'dashboard') renderDashboard();
+  if (currentSection() === 'transactions') renderTransactions();
+  showToast(wasEditing ? 'Despesa fixa atualizada ✓' : 'Despesa fixa adicionada e lançada nas transações ✓', 'success');
 }
 
 function editFixedExpense(id) {
@@ -2616,19 +2673,32 @@ function toggleFixedExpense(id) {
   const item = fixedExpenses.find(expense => expense.id === id);
   if (!item) return;
   item.active = item.active === false;
+  if (item.active === false) {
+    const currentMonth = getCurrentMonthStr();
+    transactions = transactions.filter(t => !(t.fixedExpenseId === id && (t.fixedExpenseMonth >= currentMonth || t.date >= `${currentMonth}-01`)));
+  } else {
+    processFixedExpenses();
+  }
   saveData();
-  processFixedExpenses();
   renderFixedExpenses();
+  renderDashboardKPIs();
+  if (currentSection() === 'dashboard') renderDashboard();
+  if (currentSection() === 'transactions') renderTransactions();
+  showToast(item.active ? 'Despesa fixa ativada ✓' : 'Despesa fixa pausada', 'info');
 }
 
 function deleteFixedExpense(id) {
   const item = fixedExpenses.find(expense => expense.id === id);
-  if (!item || !confirm(`Excluir a despesa fixa “${item.desc}”? As cobranças já lançadas serão mantidas.`)) return;
+  if (!item || !confirm(`Excluir a despesa fixa “${item.desc}”? Deseja remover também os lançamentos automáticos correspondentes nas transações?`)) return;
   fixedExpenses = fixedExpenses.filter(expense => expense.id !== id);
+  transactions = transactions.filter(t => t.fixedExpenseId !== id);
   if (editingFixedExpenseId === id) resetFixedExpenseForm();
   saveData();
   renderFixedExpenses();
-  showToast('Despesa fixa removida; lançamentos anteriores foram preservados', 'warning');
+  renderDashboardKPIs();
+  if (currentSection() === 'dashboard') renderDashboard();
+  if (currentSection() === 'transactions') renderTransactions();
+  showToast('Despesa fixa e seus lançamentos foram removidos', 'warning');
 }
 
 function renderFixedExpenses() {
@@ -2771,6 +2841,8 @@ function saveLoan() {
   saveData();
   resetLoanForm();
   renderLoans();
+  renderDashboardKPIs();
+  if (currentSection() === 'dashboard') renderDashboard();
   showToast(wasEditing ? 'Empréstimo atualizado ✓' : 'Valor emprestado registrado ✓', 'success');
 }
 
@@ -2796,6 +2868,8 @@ function deleteLoan(id) {
   if (editingLoanId === id) resetLoanForm();
   saveData();
   renderLoans();
+  renderDashboardKPIs();
+  if (currentSection() === 'dashboard') renderDashboard();
   showToast('Registro removido', 'warning');
 }
 
@@ -2835,6 +2909,8 @@ function saveLoanPayment() {
   saveData();
   closeLoanPaymentModal();
   renderLoans();
+  renderDashboardKPIs();
+  if (currentSection() === 'dashboard') renderDashboard();
   showToast(getLoanBalance(loan) === 0 ? 'Dívida quitada ✓' : 'Pagamento registrado ✓', 'success');
 }
 
@@ -2844,6 +2920,8 @@ function deleteLoanPayment(loanId, paymentId) {
   loan.payments = (loan.payments || []).filter(payment => payment.id !== paymentId);
   saveData();
   renderLoans();
+  renderDashboardKPIs();
+  if (currentSection() === 'dashboard') renderDashboard();
   showToast('Pagamento removido', 'warning');
 }
 
