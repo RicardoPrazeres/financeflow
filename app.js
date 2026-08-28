@@ -35,23 +35,41 @@ const SMART_RULES = [
   { keywords:['ação','fundo','tesouro','cdb','poupança','dividendo','investimento','renda fixa'], cat:'investment' },
 ];
 
-// ── FIREBASE ─────────────────────────────────────
-const firebaseConfig = {
-  apiKey: "AIzaSyCI31-BVkX2z7i_D9bn9UWdjMEjVIj5EwI",
-  authDomain: "financeflow-98869.firebaseapp.com",
-  projectId: "financeflow-98869",
-  storageBucket: "financeflow-98869.firebasestorage.app",
-  messagingSenderId: "303697782800",
-  appId: "1:303697782800:web:d53a70759d9bab3954c295",
-  measurementId: "G-9H52PYRSNP"
-};
-let app, db, auth, currentUser = null;
-if (typeof firebase !== 'undefined') {
-  app = firebase.initializeApp(firebaseConfig);
-  db = firebase.firestore();
-  auth = firebase.auth();
-  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
-    .catch(err => console.error("Auth persistence setup erro: ", err));
+// ── SUPABASE CONFIGURATION & CLIENT ───────────────
+// Você pode preencher as credenciais padrão aqui ou direto na tela de Preferências:
+const DEFAULT_SUPABASE_URL = '';
+const DEFAULT_SUPABASE_ANON_KEY = '';
+
+function getSupabaseConfig() {
+  const storedUrl = localStorage.getItem('ff_supabase_url');
+  const storedKey = localStorage.getItem('ff_supabase_anon_key');
+  const url = storedUrl || DEFAULT_SUPABASE_URL;
+  const key = storedKey || DEFAULT_SUPABASE_ANON_KEY;
+  const isConfigured = Boolean(url && key && url.startsWith('http') && !url.includes('YOUR_PROJECT_ID'));
+  return { url, key, isConfigured };
+}
+
+let supabase = null;
+let currentUser = null;
+
+function initSupabase() {
+  const { url, key, isConfigured } = getSupabaseConfig();
+  if (isConfigured && typeof window.supabase !== 'undefined') {
+    try {
+      supabase = window.supabase.createClient(url, key, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
+      });
+    } catch (e) {
+      console.warn('Erro ao inicializar cliente Supabase:', e);
+      supabase = null;
+    }
+  } else {
+    supabase = null;
+  }
 }
 
 let GEMINI_API_KEY = localStorage.getItem('ff_gemini_api_key') || '';
@@ -268,42 +286,56 @@ let selectMode = false;
 let selectedIds = new Set();
 
 // ── INIT ─────────────────────────────────────────
-function init() {
+async function init() {
   initTheme();
-  if (auth) {
-    auth.useDeviceLanguage();
-    auth.getRedirectResult().then(result => {
-      if (result && result.user) {
-        localStorage.removeItem('ff_guest_mode');
-        setLoginState('Login concluído. Carregando seus dados...', 'success');
-        showToast(`Login realizado! Bem-vindo(a) ${result.user.displayName || ''} 👋`, 'success');
-      }
-    }).catch(err => {
-      console.error('Erro no resultado do redirecionamento:', err);
-      handleLoginError(err);
-    });
+  initSupabase();
 
-    auth.onAuthStateChanged(user => {
-      if (user) {
+  if (supabase) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        currentUser = session.user;
         localStorage.removeItem('ff_guest_mode');
-        loginInProgress = false;
-        setLoginState('', 'success');
-        currentUser = user;
         document.getElementById('loginOverlay').style.display = 'none';
-        loadDataFromFirebase();
+        await loadDataFromSupabase();
+        finishInit();
       } else {
+        checkGuestOrShowLogin();
+      }
+    } catch (err) {
+      console.error('Erro ao verificar sessão Supabase:', err);
+      checkGuestOrShowLogin();
+    }
+
+    supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        currentUser = session.user;
+        localStorage.removeItem('ff_guest_mode');
+        document.getElementById('loginOverlay').style.display = 'none';
+        loginInProgress = false;
+        setLoginState('', 'success', false);
+        await loadDataFromSupabase();
+        renderSection(currentSection());
+        renderDashboardKPIs();
+      } else if (event === 'SIGNED_OUT') {
         currentUser = null;
-        if (localStorage.getItem('ff_guest_mode') === 'true') {
-          loadData();
-          finishInit();
-        } else {
+        if (!localStorage.getItem('ff_guest_mode')) {
           document.getElementById('loginOverlay').style.display = 'flex';
         }
       }
     });
   } else {
+    checkGuestOrShowLogin();
+  }
+}
+
+function checkGuestOrShowLogin() {
+  if (localStorage.getItem('ff_guest_mode') === 'true') {
+    currentUser = { id: 'guest_user', email: 'guest@financeflow.local', user_metadata: { name: 'Convidado' } };
     loadData();
     finishInit();
+  } else {
+    document.getElementById('loginOverlay').style.display = 'flex';
   }
 }
 
@@ -511,47 +543,33 @@ function setLoginState(message = '', type = 'info', busy = false) {
   }
 }
 
-function handleLoginError(err) {
-  const code = err?.code || '';
-  const messages = {
-    'auth/popup-blocked': 'O navegador bloqueou a janela do Google. Permita pop-ups para este site e tente novamente.',
-    'auth/popup-closed-by-user': 'A entrada foi cancelada antes de concluir. Toque em “Entrar com Google” para tentar novamente.',
-    'auth/cancelled-popup-request': 'Já existe uma tentativa de entrada em andamento.',
-    'auth/network-request-failed': 'Não foi possível conectar ao Google. Verifique a internet e tente novamente.',
-    'auth/web-storage-unsupported': 'O navegador está bloqueando o armazenamento necessário. Abra o site no Safari ou Chrome fora do modo privado.',
-    'auth/unauthorized-domain': `O domínio ${window.location.hostname} precisa ser autorizado no Firebase. Enquanto isso, use o modo local.`,
-    'auth/operation-not-supported-in-this-environment': 'Este navegador não permite a entrada do Google. Abra o site diretamente no Safari ou Chrome.',
-  };
-  const message = messages[code] || 'Não foi possível entrar com o Google. Tente novamente ou use o modo local.';
-
-  loginInProgress = false;
-  setLoginState(message, 'error', false);
-  showToast(message, 'error');
-}
-
 async function loginWithGoogle() {
   if (loginInProgress) return;
   localStorage.removeItem('ff_guest_mode');
-  if (typeof firebase === 'undefined' || !auth) {
-    handleLoginError({ code: 'auth/operation-not-supported-in-this-environment' });
+
+  if (!supabase) {
+    setLoginState('Supabase não conectado. Use o Modo Local abaixo ou insira suas credenciais em Preferências.', 'info', false);
+    showToast('Configure a URL e Chave do Supabase em Preferências ou use o Modo Local ⚡', 'info');
     return;
   }
 
-  const provider = new firebase.auth.GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: 'select_account' });
-
   loginInProgress = true;
-  setLoginState('Uma janela segura do Google será aberta para você escolher a conta.', 'info', true);
+  setLoginState('Conectando ao Google via Supabase...', 'info', true);
 
   try {
-    const result = await auth.signInWithPopup(provider);
-    if (result?.user) {
-      localStorage.removeItem('ff_guest_mode');
-      setLoginState('Login concluído. Carregando seus dados...', 'success', true);
-    }
+    const redirectUrl = window.location.origin + window.location.pathname;
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectUrl
+      }
+    });
+    if (error) throw error;
   } catch (err) {
-    console.error('Erro no login Google:', err);
-    handleLoginError(err);
+    console.error('Erro no login Google Supabase:', err);
+    loginInProgress = false;
+    setLoginState(err.message || 'Não foi possível entrar com Google.', 'error', false);
+    showToast(err.message || 'Erro ao conectar com Google', 'error');
   }
 }
 
@@ -559,13 +577,13 @@ function useGuestMode() {
   localStorage.setItem('ff_guest_mode', 'true');
   loginInProgress = false;
   setLoginState('', 'info', false);
-  currentUser = null;
+  currentUser = { id: 'guest_user', email: 'guest@financeflow.local', user_metadata: { name: 'Convidado' } };
   loadData();
   finishInit();
   showToast('Modo Local (Offline) ativado ⚡', 'info');
 }
 
-function logout() {
+async function logout() {
   localStorage.removeItem('ff_guest_mode');
   transactions = [];
   budgets = [];
@@ -579,13 +597,17 @@ function logout() {
   localStorage.removeItem('ff_fixed_expenses');
   localStorage.removeItem('ff_card_invoice_adjustments');
   localStorage.removeItem('ff_loans');
-  if (auth) {
-    auth.signOut().then(() => {
-      document.getElementById('loginOverlay').style.display = 'flex';
-    });
-  } else {
-    document.getElementById('loginOverlay').style.display = 'flex';
+
+  if (supabase) {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn('Erro ao sair do Supabase:', e);
+    }
   }
+  currentUser = null;
+  document.getElementById('loginOverlay').style.display = 'flex';
+  showToast('Desconectado com sucesso', 'info');
 }
 
 function loadData() {
@@ -599,70 +621,163 @@ function loadData() {
   loans = JSON.parse(localStorage.getItem('ff_loans') || '[]');
 }
 
-let isInitialSync = true;
-function loadDataFromFirebase() {
-  if (!currentUser) return;
-  db.collection('users').doc(currentUser.uid).onSnapshot(doc => {
-    if (doc.exists) {
-      const data = doc.data();
-      transactions = JSON.parse(data.transactions || '[]');
-      budgets      = JSON.parse(data.budgets      || '[]');
-      categories   = JSON.parse(data.categories   || JSON.stringify(DEFAULT_CATEGORIES));
-      customCards  = JSON.parse(data.customCards  || JSON.stringify(DEFAULT_CARDS));
-      goals        = JSON.parse(data.goals        || '[]');
-      fixedExpenses = JSON.parse(data.fixedExpenses || '[]');
-      cardInvoiceAdjustments = JSON.parse(data.cardInvoiceAdjustments || '[]');
-      loans = JSON.parse(data.loans || '[]');
-      localStorage.setItem('ff_transactions', JSON.stringify(transactions));
-      localStorage.setItem('ff_budgets',      JSON.stringify(budgets));
-      localStorage.setItem('ff_categories',   JSON.stringify(categories));
-      localStorage.setItem('ff_custom_cards',  JSON.stringify(customCards));
-      localStorage.setItem('ff_goals',         JSON.stringify(goals));
-      localStorage.setItem('ff_fixed_expenses', JSON.stringify(fixedExpenses));
-      localStorage.setItem('ff_card_invoice_adjustments', JSON.stringify(cardInvoiceAdjustments));
-      // If user account only contains legacy auto-generated demo data, clean it up
-      if (hasOnlyDemoData(transactions)) {
-        transactions = [];
-        budgets = [];
-        saveData();
-      }
+async function loadDataFromSupabase() {
+  if (!supabase || !currentUser || currentUser.id === 'guest_user') {
+    loadData();
+    return;
+  }
 
-      localStorage.setItem('ff_loans', JSON.stringify(loans));
+  try {
+    const userId = currentUser.id;
+
+    const [
+      { data: txsData, error: txsErr },
+      { data: catsData },
+      { data: cardsData },
+      { data: feData },
+      { data: loansData },
+      { data: budgetsData },
+      { data: goalsData },
+      { data: adjData }
+    ] = await Promise.all([
+      supabase.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
+      supabase.from('custom_categories').select('*').eq('user_id', userId),
+      supabase.from('custom_cards').select('*').eq('user_id', userId),
+      supabase.from('fixed_expenses').select('*').eq('user_id', userId),
+      supabase.from('loans').select('*, loan_payments(*)').eq('user_id', userId),
+      supabase.from('budgets').select('*').eq('user_id', userId),
+      supabase.from('goals').select('*').eq('user_id', userId),
+      supabase.from('card_invoice_adjustments').select('*').eq('user_id', userId)
+    ]);
+
+    if (txsErr) throw txsErr;
+
+    transactions = (txsData || []).map(t => ({
+      id: t.id,
+      type: t.type,
+      desc: t.description,
+      amount: Number(t.amount || 0),
+      date: t.date,
+      cat: t.category,
+      payment: t.payment_method || 'outro',
+      notes: t.notes || '',
+      recurring: Boolean(t.recurring),
+      cardKey: t.card_key || null,
+      cardLabel: t.card_label || null,
+      invoiceMonth: t.invoice_month || null,
+      installments: t.installments ? Number(t.installments) : null,
+      installmentPaid: t.installment_paid ? Number(t.installment_paid) : null,
+      installmentValue: t.installment_value ? Number(t.installment_value) : null,
+      installmentTotal: t.installment_total ? Number(t.installment_total) : null,
+      installmentGroupId: t.installment_group_id || null,
+      fixedExpenseId: t.fixed_expense_id || null,
+      fixedExpenseMonth: t.fixed_expense_month || null,
+      createdAt: t.created_at
+    }));
+
+    if (hasOnlyDemoData(transactions)) {
+      transactions = [];
+      budgets = [];
+      saveData();
+    }
+
+    const customCats = (catsData || []).map(c => ({
+      id: c.id,
+      name: c.name,
+      emoji: c.emoji || '📦',
+      color: c.color || '#6b7280'
+    }));
+    categories = [...DEFAULT_CATEGORIES, ...customCats];
+
+    if (cardsData && cardsData.length > 0) {
+      customCards = cardsData.map(c => ({
+        id: c.id,
+        name: c.name,
+        initials: c.initials,
+        color: c.color,
+        limit: Number(c.card_limit || 0),
+        closingDay: c.closing_day,
+        dueDay: c.due_day
+      }));
     } else {
-       if (isInitialSync) {
-         // New user entered with Google: start 100% clean with NO demo/example data!
-         transactions = [];
-         budgets = [];
-         categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
-         customCards = JSON.parse(JSON.stringify(DEFAULT_CARDS));
-         goals = [];
-         fixedExpenses = [];
-         cardInvoiceAdjustments = [];
-         loans = [];
-         saveData();
-       }
+      customCards = JSON.parse(JSON.stringify(DEFAULT_CARDS));
     }
-    if (isInitialSync) {
-      isInitialSync = false;
-      finishInit();
-    } else {
-      renderSection(currentSection());
-      if (currentSection() !== 'dashboard') {
-         renderDashboardKPIs();
-      }
-    }
-  }, err => {
-    console.error('Erro ao ler firestore:', err);
-    if (err.message.includes("permission") || err.code === 'permission-denied') {
-      alert("⚠️ FIREBASE: Ops! Você esqueceu de alterar as Regras do Firestore para modo de teste ('allow read, write: if true;').");
-    }
-    if (isInitialSync) {
-      isInitialSync = false;
-      loadData();
-      finishInit();
-    }
-  });
+
+    fixedExpenses = (feData || []).map(f => ({
+      id: f.id,
+      desc: f.description,
+      amount: Number(f.amount || 0),
+      chargeDay: Number(f.charge_day || 1),
+      startMonth: f.start_month,
+      cat: f.category,
+      payment: f.payment_method,
+      cardKey: f.card_key || null,
+      active: f.active !== false,
+      generatedMonths: f.generated_months || [],
+      createdAt: f.created_at,
+      updatedAt: f.updated_at
+    }));
+
+    loans = (loansData || []).map(l => ({
+      id: l.id,
+      person: l.person,
+      amount: Number(l.amount || 0),
+      loanDate: l.loan_date,
+      dueDate: l.due_date || '',
+      notes: l.notes || '',
+      payments: (l.loan_payments || []).map(p => ({
+        id: p.id,
+        amount: Number(p.amount || 0),
+        date: p.payment_date,
+        notes: p.notes || '',
+        createdAt: p.created_at
+      })),
+      createdAt: l.created_at,
+      updatedAt: l.updated_at
+    }));
+
+    budgets = (budgetsData || []).map(b => ({
+      id: b.id,
+      cat: b.category,
+      limit: Number(b.amount_limit || 0),
+      month: b.month || null,
+      createdAt: b.created_at
+    }));
+
+    goals = (goalsData || []).map(g => ({
+      id: g.id,
+      name: g.name,
+      emoji: g.emoji || '🎯',
+      targetDate: g.target_date,
+      targetValue: Number(g.target_value || 0),
+      currentValue: Number(g.current_value || 0),
+      createdAt: g.created_at
+    }));
+
+    cardInvoiceAdjustments = (adjData || []).map(a => ({
+      id: a.id,
+      cardId: a.card_id,
+      month: a.month,
+      amount: Number(a.amount || 0),
+      createdAt: a.created_at
+    }));
+
+    localStorage.setItem('ff_transactions', JSON.stringify(transactions));
+    localStorage.setItem('ff_budgets', JSON.stringify(budgets));
+    localStorage.setItem('ff_categories', JSON.stringify(categories));
+    localStorage.setItem('ff_custom_cards', JSON.stringify(customCards));
+    localStorage.setItem('ff_goals', JSON.stringify(goals));
+    localStorage.setItem('ff_fixed_expenses', JSON.stringify(fixedExpenses));
+    localStorage.setItem('ff_card_invoice_adjustments', JSON.stringify(cardInvoiceAdjustments));
+    localStorage.setItem('ff_loans', JSON.stringify(loans));
+
+  } catch (err) {
+    console.error('Erro ao carregar dados do Supabase:', err);
+    loadData();
+  }
 }
+
+let syncTimeout = null;
 
 function saveData() {
   localStorage.setItem('ff_transactions', JSON.stringify(transactions));
@@ -674,23 +789,144 @@ function saveData() {
   localStorage.setItem('ff_card_invoice_adjustments', JSON.stringify(cardInvoiceAdjustments));
   localStorage.setItem('ff_loans', JSON.stringify(loans));
   
-  if (currentUser && db) {
-    db.collection('users').doc(currentUser.uid).set({
-      transactions: JSON.stringify(transactions),
-      budgets: JSON.stringify(budgets),
-      categories: JSON.stringify(categories),
-      customCards: JSON.stringify(customCards),
-      goals: JSON.stringify(goals),
-      fixedExpenses: JSON.stringify(fixedExpenses),
-      cardInvoiceAdjustments: JSON.stringify(cardInvoiceAdjustments),
-      loans: JSON.stringify(loans),
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }).catch(e => {
-      console.error("Erro ao salvar nuvem", e);
-      if (e.message.includes("permission") || e.code === 'permission-denied') {
-        alert("O Firebase não deixou salvar. Vá no Console > Firestore > Regras, e libere o acesso!");
+  if (supabase && currentUser && currentUser.id !== 'guest_user') {
+    if (syncTimeout) clearTimeout(syncTimeout);
+    syncTimeout = setTimeout(() => {
+      syncAllToSupabase().catch(err => console.error('Erro ao sincronizar com Supabase:', err));
+    }, 400);
+  }
+}
+
+async function syncAllToSupabase() {
+  if (!supabase || !currentUser || currentUser.id === 'guest_user') return;
+  const userId = currentUser.id;
+
+  try {
+    if (transactions.length > 0) {
+      const txRows = transactions.map(t => ({
+        id: t.id,
+        user_id: userId,
+        type: t.type,
+        description: t.desc,
+        amount: Number(t.amount || 0),
+        date: t.date,
+        category: t.cat,
+        payment_method: t.payment || 'outro',
+        notes: t.notes || null,
+        recurring: Boolean(t.recurring),
+        card_key: t.cardKey || null,
+        card_label: t.cardLabel || null,
+        invoice_month: t.invoiceMonth || null,
+        installments: t.installments ? Number(t.installments) : null,
+        installment_paid: t.installmentPaid ? Number(t.installmentPaid) : null,
+        installment_value: t.installmentValue ? Number(t.installmentValue) : null,
+        installment_total: t.installmentTotal ? Number(t.installmentTotal) : null,
+        installment_group_id: t.installmentGroupId || null,
+        fixed_expense_id: t.fixedExpenseId || null,
+        fixed_expense_month: t.fixedExpenseMonth || null
+      }));
+      await supabase.from('transactions').upsert(txRows, { onConflict: 'id,user_id' });
+    }
+
+    if (fixedExpenses.length > 0) {
+      const feRows = fixedExpenses.map(f => ({
+        id: f.id,
+        user_id: userId,
+        description: f.desc,
+        amount: Number(f.amount || 0),
+        charge_day: Number(f.chargeDay || 1),
+        start_month: f.startMonth,
+        category: f.cat,
+        payment_method: f.payment,
+        card_key: f.cardKey || null,
+        active: f.active !== false,
+        generated_months: f.generatedMonths || []
+      }));
+      await supabase.from('fixed_expenses').upsert(feRows, { onConflict: 'id,user_id' });
+    }
+
+    if (loans.length > 0) {
+      const loanRows = loans.map(l => ({
+        id: l.id,
+        user_id: userId,
+        person: l.person,
+        amount: Number(l.amount || 0),
+        loan_date: l.loanDate,
+        due_date: l.dueDate || null,
+        notes: l.notes || null
+      }));
+      await supabase.from('loans').upsert(loanRows, { onConflict: 'id,user_id' });
+
+      const paymentRows = [];
+      loans.forEach(l => {
+        (l.payments || []).forEach(p => {
+          paymentRows.push({
+            id: p.id,
+            loan_id: l.id,
+            user_id: userId,
+            amount: Number(p.amount || 0),
+            payment_date: p.date,
+            notes: p.notes || null
+          });
+        });
+      });
+      if (paymentRows.length > 0) {
+        await supabase.from('loan_payments').upsert(paymentRows, { onConflict: 'id,user_id' });
       }
-    });
+    }
+
+    if (budgets.length > 0) {
+      const bRows = budgets.map(b => ({
+        id: b.id,
+        user_id: userId,
+        category: b.cat,
+        amount_limit: Number(b.limit || 0),
+        month: b.month || null
+      }));
+      await supabase.from('budgets').upsert(bRows, { onConflict: 'id,user_id' });
+    }
+
+    if (goals.length > 0) {
+      const gRows = goals.map(g => ({
+        id: g.id,
+        user_id: userId,
+        name: g.name,
+        emoji: g.emoji || '🎯',
+        target_date: g.targetDate,
+        target_value: Number(g.targetValue || 0),
+        current_value: Number(g.currentValue || 0)
+      }));
+      await supabase.from('goals').upsert(gRows, { onConflict: 'id,user_id' });
+    }
+
+    if (customCards.length > 0) {
+      const cardRows = customCards.map(c => ({
+        id: c.id,
+        user_id: userId,
+        name: c.name,
+        initials: c.initials || 'CC',
+        color: c.color,
+        card_limit: Number(c.limit || 0),
+        closing_day: c.closingDay || null,
+        due_day: c.dueDay || null
+      }));
+      await supabase.from('custom_cards').upsert(cardRows, { onConflict: 'id,user_id' });
+    }
+
+    const defaultIds = new Set(DEFAULT_CATEGORIES.map(c => c.id));
+    const userCustomCats = categories.filter(c => !defaultIds.has(c.id));
+    if (userCustomCats.length > 0) {
+      const catRows = userCustomCats.map(c => ({
+        id: c.id,
+        user_id: userId,
+        name: c.name,
+        emoji: c.emoji || '📦',
+        color: c.color || '#6b7280'
+      }));
+      await supabase.from('custom_categories').upsert(catRows, { onConflict: 'id,user_id' });
+    }
+  } catch (err) {
+    console.error('Erro na sincronização com Supabase:', err);
   }
 }
 
@@ -1174,9 +1410,15 @@ function deleteTransaction(id) {
 
   if (gid) {
     transactions = transactions.filter(t => t.installmentGroupId !== gid);
+    if (supabase && currentUser && currentUser.id !== 'guest_user') {
+      supabase.from('transactions').delete().eq('installment_group_id', gid).eq('user_id', currentUser.id).then();
+    }
     showToast('Todas as parcelas foram excluídas ✓', 'warning');
   } else {
     transactions = transactions.filter(t => t.id !== id);
+    if (supabase && currentUser && currentUser.id !== 'guest_user') {
+      supabase.from('transactions').delete().eq('id', id).eq('user_id', currentUser.id).then();
+    }
     showToast('Transação excluída', 'warning');
   }
 
@@ -1966,6 +2208,25 @@ function renderReportTable() {
 
 // ── SETTINGS ─────────────────────────────────────
 function renderSettings() {
+  // Supabase Status
+  const { url, key, isConfigured } = getSupabaseConfig();
+  const urlInput = document.getElementById('supabaseUrlInput');
+  const keyInput = document.getElementById('supabaseKeyInput');
+  const badge = document.getElementById('supabaseStatusBadge');
+  if (urlInput) urlInput.value = localStorage.getItem('ff_supabase_url') || (isConfigured ? url : '');
+  if (keyInput) keyInput.value = localStorage.getItem('ff_supabase_anon_key') || (isConfigured ? key : '');
+  if (badge) {
+    if (isConfigured && supabase) {
+      badge.textContent = '● Conectado (Nuvem)';
+      badge.style.background = 'rgba(34,197,94,0.15)';
+      badge.style.color = 'var(--green)';
+    } else {
+      badge.textContent = '○ Modo Local (Offline)';
+      badge.style.background = 'rgba(234,179,8,0.15)';
+      badge.style.color = 'var(--yellow)';
+    }
+  }
+
   // Categorias
   const el = document.getElementById('categoryList');
   const defaults = DEFAULT_CATEGORIES.map(c=>c.id);
@@ -2130,14 +2391,52 @@ function deleteCategory(id) {
   showToast('Categoria removida', 'warning');
 }
 
+function saveSupabaseConfig() {
+  const url = document.getElementById('supabaseUrlInput')?.value.trim() || '';
+  const key = document.getElementById('supabaseKeyInput')?.value.trim() || '';
+  if (url) localStorage.setItem('ff_supabase_url', url);
+  else localStorage.removeItem('ff_supabase_url');
+
+  if (key) localStorage.setItem('ff_supabase_anon_key', key);
+  else localStorage.removeItem('ff_supabase_anon_key');
+
+  initSupabase();
+  renderSettings();
+  showToast('Configurações do Supabase salvas ✓', 'success');
+  if (supabase) {
+    testSupabaseConnection();
+  }
+}
+
+async function testSupabaseConnection() {
+  if (!supabase) {
+    return showToast('Informe a URL e Chave do Supabase primeiro', 'warning');
+  }
+  showToast('Testando conexão com o Supabase...', 'info');
+  try {
+    const { error } = await supabase.from('profiles').select('count', { count: 'exact', head: true });
+    showToast('Conexão com Supabase bem-sucedida! 🚀', 'success');
+    renderSettings();
+  } catch (err) {
+    showToast('Falha ao conectar: verifique a URL e a Chave Anon', 'error');
+  }
+}
+
 function clearAllData() {
   if (!confirm('⚠️ Isso irá apagar TODOS os dados locais e na nuvem. Continuar?')) return;
   if (!confirm('Tem certeza absoluta? Esta ação não pode ser desfeita.')) return;
   localStorage.clear();
-  if (currentUser && db) {
-    db.collection('users').doc(currentUser.uid).delete().then(() => {
-      location.reload();
-    });
+  if (supabase && currentUser && currentUser.id !== 'guest_user') {
+    const uid = currentUser.id;
+    Promise.all([
+      supabase.from('transactions').delete().eq('user_id', uid),
+      supabase.from('fixed_expenses').delete().eq('user_id', uid),
+      supabase.from('loans').delete().eq('user_id', uid),
+      supabase.from('budgets').delete().eq('user_id', uid),
+      supabase.from('goals').delete().eq('user_id', uid),
+      supabase.from('custom_cards').delete().eq('user_id', uid),
+      supabase.from('custom_categories').delete().eq('user_id', uid)
+    ]).then(() => location.reload()).catch(() => location.reload());
   } else {
     location.reload();
   }
@@ -2725,6 +3024,10 @@ function deleteFixedExpense(id) {
   if (!item || !confirm(`Excluir a despesa fixa “${item.desc}”? Deseja remover também os lançamentos automáticos correspondentes nas transações?`)) return;
   fixedExpenses = fixedExpenses.filter(expense => expense.id !== id);
   transactions = transactions.filter(t => t.fixedExpenseId !== id);
+  if (supabase && currentUser && currentUser.id !== 'guest_user') {
+    supabase.from('fixed_expenses').delete().eq('id', id).eq('user_id', currentUser.id).then();
+    supabase.from('transactions').delete().eq('fixed_expense_id', id).eq('user_id', currentUser.id).then();
+  }
   if (editingFixedExpenseId === id) resetFixedExpenseForm();
   saveData();
   renderFixedExpenses();
@@ -2898,6 +3201,9 @@ function deleteLoan(id) {
   const loan = loans.find(item => item.id === id);
   if (!loan || !confirm(`Excluir o registro de ${loan.person} e todo o histórico de pagamentos?`)) return;
   loans = loans.filter(item => item.id !== id);
+  if (supabase && currentUser && currentUser.id !== 'guest_user') {
+    supabase.from('loans').delete().eq('id', id).eq('user_id', currentUser.id).then();
+  }
   if (editingLoanId === id) resetLoanForm();
   saveData();
   renderLoans();
