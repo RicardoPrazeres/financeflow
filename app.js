@@ -449,9 +449,14 @@ function isTransactionForCard(transaction, cardId) {
   return cardId === 'outro';
 }
 
+function getTransactionInvoiceMonth(t) {
+  if (t.invoiceMonth) return normalizeMonth(t.invoiceMonth);
+  return normalizeMonth(t.date);
+}
+
 function getCardTransactionsTotal(cardId, month) {
   return transactions
-    .filter(t => isTransactionForCard(t, cardId) && normalizeMonth(t.date) === normalizeMonth(month))
+    .filter(t => isTransactionForCard(t, cardId) && getTransactionInvoiceMonth(t) === normalizeMonth(month))
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 }
 
@@ -487,7 +492,7 @@ function getManualInvoiceTotal(prefix) {
 function getAllCardsInvoiceTotal(prefix) {
   const months = new Set(getInvoiceMonthsForPeriod(prefix));
   const transactionTotal = transactions
-    .filter(transaction => isCreditTransaction(transaction) && months.has(normalizeMonth(transaction.date)))
+    .filter(transaction => isCreditTransaction(transaction) && months.has(getTransactionInvoiceMonth(transaction)))
     .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
   const manualTotal = getManualInvoiceTotalForMonths(months);
   return transactionTotal + manualTotal;
@@ -1048,6 +1053,7 @@ function saveTransaction() {
   if (!date)   { showToast('Informe a data', 'error'); return; }
 
   const savedAmount = n > 1 ? +(totalAmt / n).toFixed(2) : totalAmt;
+  const firstAmount = n > 1 ? +(totalAmt - savedAmount * (n - 1)).toFixed(2) : totalAmt;
 
   const [yy, mm, dd] = date.split('-').map(Number);
   let monthOffset = 0;
@@ -1057,6 +1063,10 @@ function saveTransaction() {
     }
   }
 
+  const baseInvoiceMonth = payment === 'credito'
+    ? getSafeMonthDate(yy, (mm - 1) + monthOffset, 1).slice(0, 7)
+    : null;
+
   if (editingId) {
     const idx = transactions.findIndex(t => t.id === editingId);
     if (idx === -1) { closeModal(); return; }
@@ -1065,7 +1075,7 @@ function saveTransaction() {
     const gid = oldTx.installmentGroupId;
 
     if (gid) {
-      const startDate = getSafeMonthDate(yy, (mm - 1) + monthOffset - (oldTx.installmentPaid - 1), dd);
+      const startDate = getSafeMonthDate(yy, (mm - 1) - (oldTx.installmentPaid - 1), dd);
 
       transactions = transactions.filter(t => t.installmentGroupId !== gid);
 
@@ -1073,17 +1083,19 @@ function saveTransaction() {
         const [sy, sm, sd] = startDate.split('-').map(Number);
         for (let i = 1; i <= n; i++) {
           const loopDateStr = getSafeMonthDate(sy, (sm - 1) + (i - 1), sd);
+          const instAmount = i === 1 ? firstAmount : savedAmount;
+          const instInvoiceMonth = payment === 'credito' ? getSafeMonthDate(sy, (sm - 1) + monthOffset + (i - 1), 1).slice(0, 7) : null;
           transactions.push({
-            id:uid(), type:currentType, desc, amount:savedAmount, date:loopDateStr, cat, payment, notes, recurring,
-            cardKey, cardLabel,
-            installments: n, installmentPaid: i, installmentValue: savedAmount, installmentTotal: totalAmt,
+            id:uid(), type:currentType, desc, amount:instAmount, date:loopDateStr, cat, payment, notes, recurring,
+            cardKey, cardLabel, invoiceMonth: instInvoiceMonth,
+            installments: n, installmentPaid: i, installmentValue: instAmount, installmentTotal: totalAmt,
             installmentGroupId: gid, createdAt:new Date().toISOString()
           });
         }
       } else {
         transactions.push({
-          id:uid(), type:currentType, desc, amount:savedAmount, date: startDate, cat, payment, notes, recurring,
-          cardKey, cardLabel,
+          id:uid(), type:currentType, desc, amount:totalAmt, date: startDate, cat, payment, notes, recurring,
+          cardKey, cardLabel, invoiceMonth: baseInvoiceMonth,
           installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null,
           createdAt:new Date().toISOString()
         });
@@ -1093,20 +1105,21 @@ function saveTransaction() {
         transactions.splice(idx, 1);
         const newGid = uid();
         for (let i = 1; i <= n; i++) {
-          const loopDateStr = getSafeMonthDate(yy, (mm - 1) + monthOffset + (i - 1), dd);
+          const loopDateStr = getSafeMonthDate(yy, (mm - 1) + (i - 1), dd);
+          const instAmount = i === 1 ? firstAmount : savedAmount;
+          const instInvoiceMonth = payment === 'credito' ? getSafeMonthDate(yy, (mm - 1) + monthOffset + (i - 1), 1).slice(0, 7) : null;
           transactions.push({
-            id:uid(), type:currentType, desc, amount:savedAmount, date:loopDateStr, cat, payment, notes, recurring,
-            cardKey, cardLabel,
-            installments: n, installmentPaid: i, installmentValue: savedAmount, installmentTotal: totalAmt,
+            id:uid(), type:currentType, desc, amount:instAmount, date:loopDateStr, cat, payment, notes, recurring,
+            cardKey, cardLabel, invoiceMonth: instInvoiceMonth,
+            installments: n, installmentPaid: i, installmentValue: instAmount, installmentTotal: totalAmt,
             installmentGroupId: newGid, createdAt:new Date().toISOString()
           });
         }
       } else {
-        const txDate = monthOffset === 1 ? getSafeMonthDate(yy, (mm - 1) + monthOffset, dd) : date;
         transactions[idx] = {
           ...transactions[idx],
-          type:currentType, desc, amount:savedAmount, date: txDate, cat, payment, notes, recurring,
-          cardKey, cardLabel,
+          type:currentType, desc, amount:totalAmt, date, cat, payment, notes, recurring,
+          cardKey, cardLabel, invoiceMonth: baseInvoiceMonth,
           installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null
         };
       }
@@ -1116,29 +1129,30 @@ function saveTransaction() {
     if (n > 1) {
       const groupId = uid();
       for (let i = 1; i <= n; i++) {
-        const loopDateStr = getSafeMonthDate(yy, (mm - 1) + monthOffset + (i - 1), dd);
+        const loopDateStr = getSafeMonthDate(yy, (mm - 1) + (i - 1), dd);
+        const instAmount = i === 1 ? firstAmount : savedAmount;
+        const instInvoiceMonth = payment === 'credito' ? getSafeMonthDate(yy, (mm - 1) + monthOffset + (i - 1), 1).slice(0, 7) : null;
 
         transactions.push({
-          id:uid(), type:currentType, desc, amount:savedAmount, date:loopDateStr, cat, payment, notes, recurring,
-          cardKey, cardLabel,
+          id:uid(), type:currentType, desc, amount:instAmount, date:loopDateStr, cat, payment, notes, recurring,
+          cardKey, cardLabel, invoiceMonth: instInvoiceMonth,
           installments: n,
           installmentPaid: i,
-          installmentValue: savedAmount,
+          installmentValue: instAmount,
           installmentTotal: totalAmt,
           installmentGroupId: groupId,
           createdAt:new Date().toISOString()
         });
       }
-      showToast(`Compra parcelada: ${n}x de R$ ${(savedAmount).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} ${monthOffset === 1 ? '(mês seguinte)' : ''} ✓`, 'success');
+      showToast(`Compra parcelada: ${n}x de R$ ${(savedAmount).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} ${monthOffset === 1 ? '(fatura mês seguinte)' : ''} ✓`, 'success');
     } else {
-      const txDate = monthOffset === 1 ? getSafeMonthDate(yy, (mm - 1) + monthOffset, dd) : date;
       transactions.push({
-        id:uid(), type:currentType, desc, amount:savedAmount, date: txDate, cat, payment, notes, recurring,
-        cardKey, cardLabel,
+        id:uid(), type:currentType, desc, amount:totalAmt, date, cat, payment, notes, recurring,
+        cardKey, cardLabel, invoiceMonth: baseInvoiceMonth,
         installments: null, installmentPaid: null, installmentValue: null, installmentTotal: null,
         createdAt:new Date().toISOString()
       });
-      showToast(monthOffset === 1 ? 'Lançado na fatura do mês seguinte (após fechamento) 💳' : 'Transação adicionada ✓', 'success');
+      showToast(monthOffset === 1 ? 'Lançado na data real (fatura do mês seguinte) 💳' : 'Transação adicionada ✓', 'success');
     }
   }
 
@@ -1302,14 +1316,15 @@ function closeBudgetModal() {
 
 function saveBudget() {
   const cat   = document.getElementById('bCategory').value;
-  const limit = parseFloat(document.getElementById('bLimit').value);
-  const month = new Date().toISOString().slice(0,7);
+  const limit = parseAmount(document.getElementById('bLimit').value);
+  const month = getCurrentMonthStr();
 
   if (!limit || limit <= 0) { showToast('Informe um limite válido', 'error'); return; }
 
-  const existing = budgets.findIndex(b => b.cat === cat && b.month === month);
+  const existing = budgets.findIndex(b => b.cat === cat);
   if (existing >= 0) {
     budgets[existing].limit = limit;
+    budgets[existing].month = month;
   } else {
     budgets.push({ id:uid(), cat, limit, month });
   }
@@ -1346,8 +1361,8 @@ function saveGoal() {
   const name = document.getElementById('gName').value.trim();
   const emoji = document.getElementById('gEmoji').value.trim() || '🎯';
   const targetDate = document.getElementById('gTargetDate').value;
-  const targetValue = parseFloat(document.getElementById('gTargetValue').value);
-  const currentValue = parseFloat(document.getElementById('gCurrentValue').value) || 0;
+  const targetValue = parseAmount(document.getElementById('gTargetValue').value);
+  const currentValue = parseAmount(document.getElementById('gCurrentValue').value) || 0;
 
   if (!name) { showToast('Informe o nome da meta', 'error'); return; }
   if (!targetValue || targetValue <= 0) { showToast('Informe um valor objetivo válido', 'error'); return; }
@@ -1430,7 +1445,7 @@ function closeAporteModal() {
 }
 
 function saveAporte() {
-  const val = parseFloat(document.getElementById('aporteValue').value);
+  const val = parseAmount(document.getElementById('aporteValue').value);
   if (!val || val <= 0) { showToast('Informe um valor de aporte válido', 'error'); return; }
 
   const g = goals.find(x => x.id === activeAporteGoalId);
@@ -1446,7 +1461,7 @@ function saveAporte() {
       type: 'expense',
       desc: `Aporte meta: ${g.name}`,
       amount: val,
-      date: new Date().toISOString().slice(0,10),
+      date: getTodayStr(),
       cat: 'investment',
       payment: 'Pix',
       notes: `Aporte automático para a meta ${g.name}`,
@@ -1466,10 +1481,10 @@ function saveAporte() {
 
 // ── ALERTS ───────────────────────────────────────
 function checkAlerts() {
-  const month = new Date().toISOString().slice(0,7);
+  const month = getCurrentMonthStr();
   const alerts = [];
 
-  budgets.filter(b => b.month === month).forEach(b => {
+  budgets.forEach(b => {
     const spent = transactions
       .filter(t => t.type === 'expense' && t.cat === b.cat && t.date?.startsWith(month))
       .reduce((s,t) => s + t.amount, 0);
@@ -1814,7 +1829,7 @@ function txItemHTML(t, showActions=false) {
 
 // ── BUDGETS ──────────────────────────────────────
 function renderBudgets() {
-  const month = new Date().toISOString().slice(0,7);
+  const month = getCurrentMonthStr();
   const el = document.getElementById('budgetGrid');
 
   if (budgets.length === 0) {
@@ -1824,7 +1839,7 @@ function renderBudgets() {
 
   el.innerHTML = budgets.map(b => {
     const cat = getCat(b.cat);
-    const spent = transactions.filter(t=>t.type==='expense'&&t.cat===b.cat&&t.date?.startsWith(b.month||month)).reduce((s,t)=>s+t.amount,0);
+    const spent = transactions.filter(t=>t.type==='expense'&&t.cat===b.cat&&t.date?.startsWith(month)).reduce((s,t)=>s+t.amount,0);
     const pct = Math.min(spent/b.limit*100,100);
     const color = pct>=100?'var(--red)':pct>=80?'var(--yellow)':'var(--green)';
     const status = pct>=100?'🔴 Excedido':pct>=80?'🟡 Atenção':'🟢 OK';
@@ -2555,7 +2570,7 @@ function fmtK(v) { return v>=1000?(v/1000).toFixed(1)+'k':v.toFixed(0); }
 function esc(s) { const d=document.createElement('div');d.textContent=s;return d.innerHTML; }
 
 function setDefaultDate() {
-  document.getElementById('fDate').value = new Date().toISOString().slice(0,10);
+  document.getElementById('fDate').value = getTodayStr();
   const loanDate = document.getElementById('loanDate');
   const loanPaymentDate = document.getElementById('loanPaymentDate');
   if (loanDate) loanDate.value = getTodayStr();
