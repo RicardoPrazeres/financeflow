@@ -2584,15 +2584,29 @@ function setDefaultFilterMonth() {
 function buildFixedExpenseOptions() {
   const cardSelect = document.getElementById('fixedCard');
   const invoiceCard = document.getElementById('invoiceCard');
-  const options = customCards.map(card => `<option value="${card.id}">${escapeHTML(card.name)}</option>`).join('');
-  if (cardSelect) cardSelect.innerHTML = options || '<option value="">Cadastre um cartão primeiro</option>';
-  if (invoiceCard) invoiceCard.innerHTML = options || '<option value="">Cadastre um cartão primeiro</option>';
+  const cardOptions = customCards.map(card => `<option value="${card.id}">${escapeHTML(card.name)}</option>`).join('');
+  if (cardSelect) {
+    cardSelect.innerHTML = `<option value="">Nenhum</option>${cardOptions}`;
+  }
+  if (invoiceCard) {
+    invoiceCard.innerHTML = cardOptions || '<option value="">Cadastre um cartão primeiro</option>';
+  }
   toggleFixedCardField();
 }
 
 function toggleFixedCardField() {
   const group = document.getElementById('fixedCardGroup');
-  if (group) group.hidden = document.getElementById('fixedPayment')?.value !== 'credito';
+  const payment = document.getElementById('fixedPayment')?.value;
+  const cardSelect = document.getElementById('fixedCard');
+  if (!group) return;
+  group.hidden = false;
+  if (payment === 'pix' || payment !== 'credito') {
+    if (cardSelect) cardSelect.value = '';
+  } else if (payment === 'credito') {
+    if (cardSelect && !cardSelect.value && customCards.length > 0) {
+      cardSelect.value = customCards[0].id;
+    }
+  }
 }
 
 function resetFixedExpenseForm() {
@@ -2601,9 +2615,11 @@ function resetFixedExpenseForm() {
   const day = document.getElementById('fixedChargeDay');
   const start = document.getElementById('fixedStartMonth');
   const payment = document.getElementById('fixedPayment');
+  const card = document.getElementById('fixedCard');
   if (day) day.value = '1';
   if (start) start.value = getCurrentMonthStr();
   if (payment) payment.value = 'pix';
+  if (card) card.value = '';
   const title = document.getElementById('fixedFormTitle');
   const button = document.getElementById('saveFixedExpenseBtn');
   const cancel = document.getElementById('cancelFixedExpenseBtn');
@@ -2621,12 +2637,12 @@ function saveFixedExpense() {
   const startMonth = document.getElementById('fixedStartMonth')?.value;
   const cat = document.getElementById('fixedCategory')?.value || 'other';
   const payment = document.getElementById('fixedPayment')?.value || 'outro';
-  const cardKey = payment === 'credito' ? document.getElementById('fixedCard')?.value : null;
+  const cardKey = (payment === 'credito' && document.getElementById('fixedCard')?.value) ? document.getElementById('fixedCard').value : null;
   if (!desc) return showToast('Informe a descrição da despesa', 'error');
   if (amount <= 0) return showToast('Informe um valor válido', 'error');
   if (!chargeDay || chargeDay < 1 || chargeDay > 31) return showToast('O dia deve estar entre 1 e 31', 'error');
   if (!startMonth) return showToast('Informe o mês inicial', 'error');
-  if (payment === 'credito' && !cardKey) return showToast('Selecione o cartão', 'error');
+  if (payment === 'credito' && !cardKey) return showToast('Selecione um cartão para pagamento no crédito', 'error');
 
   const data = { desc, amount, chargeDay, startMonth, cat, payment, cardKey, active: true };
   if (editingFixedExpenseId) {
@@ -2662,7 +2678,9 @@ function editFixedExpense(id) {
   document.getElementById('fixedCategory').value = item.cat;
   document.getElementById('fixedPayment').value = item.payment;
   toggleFixedCardField();
-  if (item.cardKey) document.getElementById('fixedCard').value = item.cardKey;
+  if (document.getElementById('fixedCard')) {
+    document.getElementById('fixedCard').value = item.cardKey || '';
+  }
   document.getElementById('fixedFormTitle').textContent = `Editar ${item.desc}`;
   document.getElementById('saveFixedExpenseBtn').textContent = 'Salvar alterações';
   document.getElementById('cancelFixedExpenseBtn').hidden = false;

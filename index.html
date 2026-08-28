@@ -427,7 +427,7 @@
                 <label class="form-group"><span class="form-label">Começar em</span><input id="fixedStartMonth" class="form-input" type="month"></label>
                 <label class="form-group"><span class="form-label">Categoria</span><select id="fixedCategory" class="form-input"></select></label>
                 <label class="form-group"><span class="form-label">Pagamento</span><select id="fixedPayment" class="form-input" onchange="toggleFixedCardField()"><option value="pix">Pix</option><option value="debito">Débito</option><option value="credito">Cartão de crédito</option><option value="dinheiro">Dinheiro</option><option value="transferencia">Transferência</option></select></label>
-                <label class="form-group" id="fixedCardGroup" hidden><span class="form-label">Cartão</span><select id="fixedCard" class="form-input"></select></label>
+                <label class="form-group" id="fixedCardGroup"><span class="form-label">Cartão</span><select id="fixedCard" class="form-input"></select></label>
               </div>
               <p class="form-hint">Uma cobrança será criada automaticamente em cada mês, sem duplicar lançamentos.</p>
               <div class="feature-form-actions"><button class="btn btn-ghost" id="cancelFixedExpenseBtn" hidden onclick="resetFixedExpenseForm()">Cancelar</button><button class="btn btn-primary" id="saveFixedExpenseBtn" onclick="saveFixedExpense()">Adicionar despesa</button></div>
